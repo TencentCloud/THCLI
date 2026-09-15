@@ -1,0 +1,29 @@
+# 依赖
+node_modules/
+
+# 构建产物（dist/ 由 prepack 生成，只进 npm 包不进仓库）
+dist/
+dist-test/
+dist-skills/
+*.tsbuildinfo
+
+# npm pack 的临时产物
+*.tgz
+
+# 日志
+*.log
+npm-debug.log*
+
+# 本地环境覆盖（凭证类，绝不入库）
+.env
+.env.*
+
+# 编辑器 / IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# 操作系统噪音
+.DS_Store
+Thumbs.db

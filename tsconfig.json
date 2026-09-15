@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "lib": ["ES2022"],
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": false,
+    // 发布物不带注释与 sourcemap：
+    //   removeComments —— 代码注释会被原样编译进 dist。注释里难免有项目约定与
+    //     未上线的地址，是给维护者看的，不该随 npm 包发给用户
+    //   sourceMap —— CLI 用不上调试映射，只会额外暴露源码结构、让包体积翻倍
+    // 需要排查线上问题时临时打开重新构建即可
+    "removeComments": true,
+    "sourceMap": false
+  },
+  "include": ["src/**/*.ts"]
+}

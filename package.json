@@ -1,0 +1,51 @@
+{
+  "name": "tencent-thcli",
+  "version": "1.0.0",
+  "description": "THCLI — Tencent Cloud LLM platform command line interface",
+  "type": "module",
+  "bin": {
+    "thcli": "dist/main.cjs"
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/main.cjs",
+    "typecheck": "tsc --noEmit",
+    "test:only": "tsc -p tsconfig.test.json && node --test \"dist-test/test/**/*.test.js\"",
+    "test": "npm run build && npm run test:only",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm run test:only"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TencentCloud/THCLI.git"
+  },
+  "homepage": "https://github.com/TencentCloud/THCLI#readme",
+  "bugs": {
+    "url": "https://github.com/TencentCloud/THCLI/issues"
+  },
+  "keywords": [
+    "tencent-cloud",
+    "llm",
+    "cli",
+    "ai",
+    "agent-skills",
+    "tokenhub"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "commander": "^12.1.0",
+    "tencentcloud-sdk-nodejs-tokenhub": "^4.1.294",
+    "tsup": "^8.5.0",
+    "typescript": "^5.7.2"
+  },
+  "license": "Apache-2.0"
+}
