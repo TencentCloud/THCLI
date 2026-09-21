@@ -1,3 +1,5 @@
+[English](./CHANGELOG.en.md) | 简体中文
+
 # Changelog
 
 所有值得注意的变更记录于此文件。
