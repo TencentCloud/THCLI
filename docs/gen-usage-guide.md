@@ -1,6 +1,6 @@
 # THCLI-AIGC `+gen` / `doctor` 使用指南
 
-适用版本：**1.0.2**（33 个生成接口：图像 6 / 视频 16 / 3D 3 / 语音音频 8）
+适用版本：**1.0.2+（含未发布改动）**（36 个生成接口：图像 6 / 视频 16 / 3D 3 / 语音音频 11）
 
 通用约定：
 
@@ -14,7 +14,7 @@
 ## 1. 接口发现与帮助
 
 ```bash
-# 列出全部 33 个接口（接口 ID / 类别 / 模型 / 同步异步 / 参数数）
+# 列出全部 36 个接口（接口 ID / 类别 / 模型 / 同步异步 / 参数数）
 thcli +gen apis
 
 # 查看单个接口的完整用法、路径、参数说明与模型差异
@@ -150,7 +150,7 @@ thcli +gen wand/hunyuan-video/world2-scene \
   --prompt "一座可以漫游的江南园林"
 ```
 
-### 2.4 语音与音乐（8 个接口）
+### 2.4 语音与音乐（11 个接口）
 
 ```bash
 # 语音识别·同步直转：本地音频走 --data（与 --input-url 二选一）
@@ -164,7 +164,13 @@ thcli +gen wand/asrproxy/async_create \
   --input-url https://example.com/2h.mp4 \
   --subtitle-format srt --output ./out
 
-# 语音合成 TTS（同步；voice_setting.voice_id 必填）
+# 语音识别·天籁方言异步转写（普通话/英语 + 31 种方言；--input-url 与 --data 二选一）
+thcli +gen tenlai/asrproxy/create_rec_task \
+  --model tenlai-asr-v1.0 \
+  --input-url https://example.com/dialect.mp3 --output ./out
+
+# 语音合成 TTS（同步；voice_setting.voice_id 必填；文本超过 5000 字符加 --stream true，
+# 分段音频由 CLI 自动拼接；流式仅支持 hex 输出，不要传 --output-format url）
 thcli +gen wand/minimax-tts/sync_tts \
   --model minimax-speech-2.6-hd \
   --text "欢迎使用腾讯云大模型服务平台。" \
@@ -172,7 +178,7 @@ thcli +gen wand/minimax-tts/sync_tts \
   --audio-setting '{"format":"mp3","sample_rate":32000}' \
   --subtitle-enable true --output ./out
 
-# 声音克隆（同步）：--audio-url 与 --audio-data 二选一，返回可复用的 voice_id
+# 声音克隆（同步）：--audio-url / --audio-data / --file-id 三选一，返回可复用的 voice_id
 thcli +gen wand/minimax-tts/sync_clone \
   --model minimax-voice-clone \
   --audio-data ./sample.mp3 --text "克隆成功后我会说这段话"
@@ -198,11 +204,21 @@ thcli +gen wand/minimax-music/generation \
   --model minimax-music-v3.0 \
   --prompt "夏日情歌，吉他伴奏" --lyrics-optimizer true
 
-# Mureka 歌词成曲（当前仅歌词成曲，--lyrics 必填）
+# Mureka 歌词成曲（三种能力按接口区分；--n 默认 2 且按首计费，只要 1 首务必 --n 1）
 thcli +gen wand/mureka-music/generation \
   --model mureka-music-v9 \
   --lyrics $'[Verse]\n夏天的风\n[Chorus]\n吹过海边' \
   --prompt "pop, emotional, female vocal" --n 1
+
+# Mureka 提示词成曲（--prompt ≤2000 字符，--styles 为 13 种风格枚举，可多选）
+thcli +gen wand/mureka-music/easy-generation \
+  --model mureka-music-v9 \
+  --prompt "一首明亮夏日氛围、带有抓耳副歌的情歌" --styles '["pop"]' --n 1
+
+# Mureka 纯音乐（--prompt ≤1024 字符，无人声）
+thcli +gen wand/mureka-music/instrumental-generation \
+  --model mureka-music-v9 \
+  --prompt "lo-fi, cozy, warm piano" --n 1
 ```
 
 ---
@@ -302,13 +318,3 @@ thcli doctor error 1201 --vendor kling
 ```
 
 排障套路：生成失败 → 看错误信息末尾的 `(code)` → `thcli doctor error <code> --vendor <厂商>` 查含义；调不通 → `thcli doctor model --id <模型>` 看按量路由；整体异常 → `thcli doctor all`。
-
----
-
-## 7. 后续版本预告
-
-以下能力已开发，将随下个版本发布（届时接口数 33 → 36）：
-
-- Mureka 提示词成曲 / 纯音乐开关
-- 天籁 31 方言长音频异步转写
-- TTS SSE 流式合成
