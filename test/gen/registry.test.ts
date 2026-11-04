@@ -57,7 +57,7 @@ describe("注册表完整性", () => {
     for (const f of FAMILIES) {
       for (const d of [f.doc].flat()) assert.match(d, /^https:\/\/cloud\.tencent\.com\/document\/product\/1823\/\d+$/, `${f.id} ${d}`);
     }
-    assert.equal(APIS.length, 33);
+    assert.equal(APIS.length, 36);
     assert.equal(new Set(APIS.map((e) => e.id)).size, APIS.length);
     assert.equal(ep("wand/vidu/text-to-video").path, "/v1/wand/vidu/text-to-video");
     assert.equal(ep("api/3d/submit").path, "/v1/api/3d/submit");
@@ -80,6 +80,7 @@ describe("注册表完整性", () => {
       for (const p of e.params) {
         if (p.default === undefined) continue;
         assert.equal(p.kind, "value", `${e.id} --${p.flag}：object/array 字段不支持默认值`);
+        if (typeof p.default === "function") continue; // 条件默认值（如 sync_tts 流式不注入 url）无静态值可断言
         if (p.valueType) assert.equal(typeof p.default, p.valueType, `${e.id} --${p.flag}：默认值类型应与 valueType 一致`);
         else assert.ok(typeof p.default === "string" || typeof p.default === "number", `${e.id} --${p.flag}：智能标量的默认值只能是 string/number`);
         if (p.choices) assert.ok(p.choices.some((c) => c === p.default), `${e.id} --${p.flag}：默认值须在 choices 内`);
@@ -118,12 +119,15 @@ describe("注册表完整性", () => {
       ["wand/hunyuan-video/world2-scene", ["prompt", "image_url"]],
       ["wand/asrproxy/sync_transcribe", ["input_url", "data", "source", "voice_encode_format"]],
       ["wand/asrproxy/async_create", ["input_url", "source", "subtitle_format"]],
-      ["wand/minimax-tts/sync_tts", ["text", "voice_setting", "audio_setting", "pronunciation_dict", "timbre_weights", "language_boost", "voice_modify", "subtitle_enable", "subtitle_type", "output_format", "aigc_watermark"]],
-      ["wand/minimax-tts/sync_clone", ["audio_url", "audio_data", "file_id", "tts_model", "voice_id", "text", "text_validation", "accuracy", "output_format"]],
+      ["wand/minimax-tts/sync_tts", ["text", "voice_setting", "audio_setting", "pronunciation_dict", "timbre_weights", "language_boost", "voice_modify", "subtitle_enable", "subtitle_type", "stream", "output_format", "aigc_watermark"]],
+      ["wand/minimax-tts/sync_clone", ["audio_url", "audio_data", "tts_model", "voice_id", "text", "text_validation", "accuracy", "output_format", "file_id"]],
       ["wand/minimax-tts/sync_design", ["prompt", "preview_text", "voice_id", "output_format", "aigc_watermark"]],
       ["wand/dubbing/async_generation", ["input_url", "src_language", "dst_language"]],
       ["wand/minimax-music/generation", ["prompt", "lyrics", "lyrics_optimizer", "is_instrumental", "output_format", "audio_setting", "aigc_watermark"]],
+      ["tenlai/asrproxy/create_rec_task", ["input_url", "data"]],
       ["wand/mureka-music/generation", ["lyrics", "prompt", "gender", "n"]],
+      ["wand/mureka-music/easy-generation", ["prompt", "styles", "n"]],
+      ["wand/mureka-music/instrumental-generation", ["prompt", "n"]],
     ];
     assert.equal(cases.length, APIS.length, "每个接口都要有字段清单");
     for (const [id, want] of cases) {
@@ -160,7 +164,7 @@ describe("注册表完整性", () => {
       ["minimax-video-h3", 2000],
       ["hy-world2-panorama", 600],
       ["minimax-speech-2.8-hd", 10000],
-      ["mureka-music-v9", 1024],
+      ["mureka-music-v9", 2000],
       ["hy-3d-3.1", 1024],
     ];
     for (const [model, max] of expected) {
@@ -223,7 +227,7 @@ describe("请求体校验（适用模型 / 必填 / 互斥）", () => {
     bad("api/3d/submit", { model: "hy-3d-3.1", prompt: "p", image_url: "https://x/a.jpg" }, /mutually exclusive/);
     ok("api/3d/submit", { model: "hy-3d-3.1", prompt: "p", image_url: "https://x/a.jpg", generate_type: "Sketch" });
     bad("wand/hunyuan-video/world2-scene", { model: "hy-world2-scene", prompt: "p", image_url: "https://x/a.jpg" }, /only one of/);
-    bad("wand/minimax-tts/sync_clone", { model: "minimax-voice-clone" }, /--audio-url \/ --audio-data/);
+    bad("wand/minimax-tts/sync_clone", { model: "minimax-voice-clone" }, /--audio-url \/ --audio-data \/ --file-id/);
     bad("wand/asrproxy/sync_transcribe", { model: "wand-asr-v1", input_url: "u", data: "d" }, /only one of/);
     bad("wand/minimax-music/generation", { model: "minimax-music-v3.0" }, /vocal songs require --lyrics/);
   });
@@ -298,15 +302,28 @@ describe("请求体校验（适用模型 / 必填 / 互斥）", () => {
     bad("wand/vidu/reference-to-video", { model: "vidu-video-q2", prompt: "p", videos: ["https://x/v.mp4"] }, /--videos is only supported by vidu-video-q2-pro/);
   });
 
-  it("Mureka：只支持歌词成曲（--lyrics 必填）；歌词 ≤5000、风格提示词 ≤1024、n ∈ [1,3]", () => {
-    const E = "wand/mureka-music/generation";
+  it("Mureka：三接口三能力——歌词成曲 lyrics 必填 / 提示词成曲 styles 仅 easy / 纯音乐；长度上限分接口（lyrics 5000、风格提示词 1024、easy prompt 2000）、n 共享 [1,3]", () => {
     const m = { model: "mureka-music-v9" };
-    bad(E, { ...m, prompt: "lo-fi", n: 1 }, /--lyrics is required/);
-    bad(E, { ...m, prompt: "p" }, /--lyrics is required/);
-    ok(E, { ...m, lyrics: "[Verse] a", prompt: "pop", gender: "female", n: 1 });
-    bad(E, { ...m, lyrics: "a".repeat(5001) }, /5000/);
-    bad(E, { ...m, lyrics: "a", prompt: "p".repeat(1025) }, /1024/);
-    bad(E, { ...m, lyrics: "a", n: 4 }, /\[1, 3\]/);
+    const G = "wand/mureka-music/generation";
+    bad(G, { ...m, prompt: "lo-fi", n: 1 }, /--lyrics is required/);
+    ok(G, { ...m, lyrics: "[Verse] a", prompt: "pop", gender: "female", n: 1 });
+    bad(G, { ...m, lyrics: "a".repeat(5001) }, /5000/);
+    bad(G, { ...m, lyrics: "a", prompt: "p".repeat(1025) }, /1024/);
+    bad(G, { ...m, lyrics: "a", n: 4 }, /\[1, 3\]/);
+
+    const E = "wand/mureka-music/easy-generation";
+    ok(E, { ...m, prompt: "a bright summer love song", styles: ["pop", "rock"], n: 1 });
+    bad(E, { ...m, styles: ["pop"] }, /--prompt is required/);
+    // easy prompt 上限 2000 由族级 maxPromptChars 兜住
+    ok(E, { ...m, prompt: "p".repeat(2000) });
+    bad(E, { ...m, prompt: "p".repeat(2001) }, /2000/);
+    // n 校验在族级 validateBody，三接口共享
+    bad(E, { ...m, prompt: "p", n: 0 }, /\[1, 3\]/);
+
+    const I = "wand/mureka-music/instrumental-generation";
+    ok(I, { ...m, prompt: "lo-fi, warm piano", n: 1 });
+    bad(I, { ...m, n: 1 }, /--prompt is required/);
+    bad(I, { ...m, prompt: "p".repeat(1025) }, /1024/);
   });
 
   it("Kling：omni 无首帧需 settings.aspect_ratio；o1 无参考图仅 5/10 秒；motion 须有 image 与 video 块", () => {

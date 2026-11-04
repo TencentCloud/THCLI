@@ -13,7 +13,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 
 import { normalizeHelpArg } from "../../src/util/help-alias.js";
-import { backoffMs, dedupePath, download, fetchWithRetry, saveTexts, withRateLimitRetry } from "../../src/commands/gen.js";
+import { backoffMs, dedupePath, download, fetchWithRetry, parseSseBody, saveTexts, withRateLimitRetry } from "../../src/commands/gen.js";
 import { initLang } from "../../src/core/i18n.js";
 import { expandHome } from "../../src/util/expand-home.js";
 
@@ -132,6 +132,67 @@ describe("+gen 接口字段 flag（--dry-run）", () => {
     assert.equal(body([tts[0], ...tts[1], "--output-format", "hex"])["output_format"], "hex");
     assert.equal(body([tts[0], ...tts[1], "--param", "output_format=hex"])["output_format"], "hex");
     assert.equal(body([tts[0], ...tts[1], "--body", '{"output_format":"hex"}'])["output_format"], "hex");
+  });
+
+  it("Mureka 三接口：generation 仅歌词成曲四字段（无 styles），easy/instrumental 的 flag 挂载与请求体", () => {
+    assert.deepEqual(body(["wand/mureka-music/generation", "--model", "mureka-music-v9", "--lyrics", "[Verse] x"]), { model: "mureka-music-v9", lyrics: "[Verse] x" });
+    assert.deepEqual(
+      body(["wand/mureka-music/easy-generation", "--model", "mureka-music-v9", "--prompt", "summer", "--styles", '["pop"]']),
+      { model: "mureka-music-v9", prompt: "summer", styles: ["pop"] },
+    );
+    assert.deepEqual(body(["wand/mureka-music/instrumental-generation", "--model", "mureka-music-v9", "--prompt", "lo-fi"]), { model: "mureka-music-v9", prompt: "lo-fi" });
+    // --styles 已从 generation 挪到 easy：commander 报未知选项
+    assert.match(run(["wand/mureka-music/generation", "--model", "mureka-music-v9", "--lyrics", "x", "--styles", '["pop"]']).out, /unknown option/);
+  });
+
+  it("Tenlai 异步 ASR：input_url 直传 URL；--data 本地音频转裸 Base64（png 会被媒体格式校验拦）；缺二选一 / 两个都传本地拦", () => {
+    assert.deepEqual(body(["tenlai/asrproxy/create_rec_task", "--input-url", "https://x/a.mp3"]), { model: "tenlai-asr-v1.0", input_url: "https://x/a.mp3" });
+    const wavFile = path.join(dir, "a.wav");
+    fs.writeFileSync(wavFile, Buffer.from([0x52, 0x49, 0x46, 0x46])); // "RIFF"
+    const withData = body(["tenlai/asrproxy/create_rec_task", "--data", wavFile]);
+    assert.equal(withData["model"], "tenlai-asr-v1.0");
+    assert.equal(withData["data"], Buffer.from([0x52, 0x49, 0x46, 0x46]).toString("base64"), "本地音频读字节转裸 Base64");
+    assert.match(run(["tenlai/asrproxy/create_rec_task", "--data", png]).out, /not a supported audio\/video format/, "音频字段拒非音频文件");
+    assert.match(run(["tenlai/asrproxy/create_rec_task"]).out, /requires one of/);
+    assert.match(run(["tenlai/asrproxy/create_rec_task", "--input-url", "https://x/a.mp3", "--data", wavFile]).out, /accepts only one of/);
+  });
+
+  it("MiniMax 文档更新：sync_tts --stream 进请求体且流式不注入 url 默认（SSE 仅支持 hex）；sync_clone --file-id 与三选一校验", () => {
+    const base = ["wand/minimax-tts/sync_tts", "--model", "minimax-speech-2.8-hd", "--text", "hi", "--voice-setting", '{"voice_id":"male-qn-qingse"}'];
+    // stream=true：不注入 output_format（上游流式仅支持 hex 分段，url 会被拒 400）
+    assert.deepEqual(body([...base, "--stream", "true"]), { model: "minimax-speech-2.8-hd", text: "hi", voice_setting: { voice_id: "male-qn-qingse" }, stream: true });
+    assert.equal(body([...base, "--stream", "true", "--output-format", "hex"])["output_format"], "hex");
+    // stream=true + 显式 url：本地早拦截（上游 400 的原文透出已验证，但报在本地更快）
+    assert.match(run([...base, "--stream", "true", "--output-format", "url"]).out, /only supports hex/);
+    assert.deepEqual(body(["wand/minimax-tts/sync_clone", "--model", "minimax-voice-clone", "--file-id", "123"]), {
+      model: "minimax-voice-clone",
+      output_format: "url",
+      file_id: 123,
+    });
+    // 文档更新：audio_url / audio_data / file_id 至少传一个（原来是前两者二选一）
+    assert.match(run(["wand/minimax-tts/sync_clone", "--model", "minimax-voice-clone"]).out, /requires one of/);
+  });
+
+  it("parseSseBody：data: JSON 分段 hex 顺序拼接 + [DONE] + 末段 usage 保留；请求体 format 回填；非 SSE 不误判", () => {
+    const sse = [
+      'data: {"base_resp":{"status_code":0},"data":{"audio":"6162","status":1}}',
+      "",
+      'data: {"base_resp":{"status_code":0},"data":{"audio":"63","status":1}}',
+      "",
+      'data: {"base_resp":{"status_code":0},"data":{"status":2},"status":"completed","usage":{"total_tokens":1750}}',
+      "",
+      "data: [DONE]",
+    ].join("\n");
+    const r = parseSseBody(sse, { audio_setting: { format: "wav" } })!;
+    const data = r["data"] as Record<string, unknown>;
+    assert.equal(data.audio, "616263", "hex 分段顺序拼接");
+    assert.equal(data.status, 2);
+    assert.equal(r["status"], "completed");
+    assert.deepEqual(r["usage"], { total_tokens: 1750 });
+    assert.equal((r["extra_info"] as Record<string, unknown>).audio_format, "wav", "流式末段无 extra_info，从请求体回填");
+    assert.equal(parseSseBody('{"data":{"audio":"x"}}'), undefined, "非 SSE 文本不误判");
+    assert.equal(parseSseBody("data: not-json"), undefined, "单段解析失败整体放弃");
+    assert.equal(parseSseBody(""), undefined, "空文本不误判");
   });
 
   it("model 可由 --param / --body 指定，以最终请求体为准做接口白名单校验", () => {

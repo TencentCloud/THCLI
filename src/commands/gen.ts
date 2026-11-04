@@ -195,6 +195,38 @@ function isNetworkError(err: unknown): boolean {
   return err instanceof Error && (err as { networkError?: boolean }).networkError === true;
 }
 
+/** MiniMax TTS stream=true 的 SSE 响应（多行 `data: JSON` + `data: [DONE]`）：
+ *  audio hex 分段顺序拼接为单响应，parse 层按非流式形状无感处理。
+ *  流式末段没有 extra_info（audio_format 缺失），用请求体 audio_setting.format 回填，
+ *  保证 hex→data URL 的 MIME 正确（未指定则由 audioOf 默认 audio/mpeg）。 */
+export function parseSseBody(text: string, req?: Obj): Obj | undefined {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length || lines.some((l) => !l.startsWith("data:"))) return undefined;
+  const events: Obj[] = [];
+  for (const line of lines) {
+    const data = line.slice(5).trim();
+    if (!data || data === "[DONE]") continue;
+    try {
+      events.push(JSON.parse(data) as Obj);
+    } catch {
+      return undefined;
+    }
+  }
+  const last = events.at(-1);
+  if (!last) return undefined;
+  const audio = events.map((e) => str((e["data"] as Obj | undefined)?.["audio"])).join("");
+  const info = (last["extra_info"] ?? {}) as Obj;
+  const reqFormat = str((req?.["audio_setting"] as Obj | undefined)?.["format"]);
+  // 末段无 audio_format 时用请求体的 audio_setting.format 回填（均缺省则交给 audioOf 的 audio/mpeg 默认）
+  const extraInfo = info["audio_format"] || !reqFormat ? info : { ...info, audio_format: reqFormat };
+  return {
+    ...last,
+    status: "completed",
+    data: { ...((last["data"] as Obj | undefined) ?? {}), audio, status: 2 },
+    extra_info: extraInfo,
+  };
+}
+
 /** 429 退避重试默认次数 */
 const DEFAULT_RETRY = 3;
 /** 429 重试的累计等待预算（毫秒）：防止 Retry-After 巨值或过多重试把提交段拖死 */
@@ -313,7 +345,12 @@ async function request(ctx: GenContext, method: "GET" | "POST", urlPath: string,
     throw Object.assign(err as Error, { networkError: true });
   }
   const text = await resp.text();
-  const respBody = parseGatewayBody(text);
+  let respBody = parseGatewayBody(text);
+  if (typeof respBody === "string") {
+    // MiniMax TTS stream=true 的 SSE 响应：拼接分段音频后按普通 JSON 响应继续
+    const sse = parseSseBody(text, body);
+    if (sse) respBody = sse;
+  }
   const parsed: Obj = typeof respBody === "string" ? {} : respBody;
   const requestId = extractRequestId(resp.headers, parsed);
   logDataPlaneCall(ctx.profile, ctx.site, {
@@ -444,8 +481,10 @@ function apiFlagValues(api: ApiRef, opts: Obj): Obj {
   for (const p of api.params) {
     const raw = opts[kebabToCamel(p.flag)];
     if (raw === undefined) {
-      // 默认值仍可被 --param / --body 覆盖（generate 里 base 先组装、layerBody 后合并）
-      if (p.default !== undefined) values[p.path] = p.default;
+      // 默认值仍可被 --param / --body 覆盖（generate 里 base 先组装、layerBody 后合并）。
+      // 函数形式拿到的是同接口里排在前面的字段（如 sync_tts 的 stream），返回 undefined 即本次不注入
+      const injected = typeof p.default === "function" ? p.default(values) : p.default;
+      if (injected !== undefined) values[p.path] = injected;
       continue;
     }
     let value = parseParamValue(p, String(raw));
@@ -1338,7 +1377,7 @@ function apiJson(api: ApiRef): Obj {
         Models: p.models,
         Usage: paramUsage(p),
         Desc: paramText(p.desc),
-        Default: p.default,
+        Default: typeof p.default === "function" ? undefined : p.default,
       })),
     ],
     Runtime: runtimeFlags(api),

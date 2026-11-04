@@ -91,7 +91,6 @@ const BASELINE: Record<string, string[]> = {
   "wand/asrproxy/sync_transcribe": [`--input-url ${U(WAV)}`],
   "wand/minimax-tts/sync_clone": [`--audio-url ${U("audio/ref6s.mp3")}`],
   "wand/minimax-music/generation": ["--lyrics '[Verse] 歌词'"],
-  "wand/mureka-music/generation": ["--lyrics '[Verse] 歌词'"],
   "wand/minimax-video/generation": ["--prompt 猫"],
   "wand/minimax-video-v2/generation": ["--ratio 16:9"],
   "wand/vidu/reference-to-video": [`--images ${L(FACE)}`],
@@ -247,7 +246,7 @@ function noteOf(p: ParamSpec): string {
   const notes: string[] = [];
   if (p.required === true) notes.push("**必填**");
   else if (Array.isArray(p.required)) notes.push(`**${p.required.join(" / ")} 必填**`);
-  if (p.default !== undefined) notes.push(`**默认 ${String(p.default)}**`);
+  if (p.default !== undefined && typeof p.default !== "function") notes.push(`**默认 ${String(p.default)}**`);
   if (p.models) notes.push(`仅 ${p.models.join(" / ")}`);
   {
     const specs = mediaSpecs(p);

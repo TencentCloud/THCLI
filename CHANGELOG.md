@@ -12,6 +12,10 @@
 ### 生成
 
 - **`+gen wand/vega-videos/tasks`（WAND 视频）`content` 素材放宽**：`image_url` / `audio_url` 支持本地文件，自动编码为 data URL（实测上游接受：image 出片、audio 解码并校验时长 2000~15000 ms）；`video_url` 实测被上游明确拒绝（400："video_url does not support inline base64; use a public URL"），维持仅公网 URL；裸 Base64（无 `data:` 前缀）提交即 400。
+- **Mureka 音乐三能力拆分**：`wand/mureka-music` 按接口区分——`generation` 歌词成曲（`--lyrics` 必填、风格提示词 ≤1024）、`easy-generation` 提示词成曲（`--prompt` 必填 ≤2000，`--styles` 13 风格枚举挪到此接口）、`instrumental-generation` 纯音乐（`--prompt` 必填 ≤1024）。`--n` 默认 2 且**按首计费**，只需 1 首务必显式 `--n 1`。
+- **Tenlai 异步语音识别**：`tenlai/asrproxy/create_rec_task`（`tenlai-asr-v1.0`），`--input-url` 与 `--data`（本地音频转 Base64）二选一；任务 ID 为数字、查询走 POST body（与 `wand/asrproxy` 的 GET 不同），转写正文与音频时长进结果元数据。
+- **MiniMax TTS 流式合成 `--stream`**：SSE 分段响应由 CLI 拼接为完整音频文件（建议输入超过 5000 字符时开启）；流式仅支持 hex 输出，`--output-format url` 与 `--stream` 同用本地拦；末段缺 `audio_format` 时按请求体 `audio_setting.format` 回填保证 MIME 正确。接口参数默认值支持函数形式（如 `stream=true` 时不再注入 `output_format=url`）。
+- **MiniMax 声音复刻补 `--file-id` 通道**：`--audio-url` / `--audio-data` / `--file-id` 三选一（文件上传接口获取的 ID）。
 
 ### 修复
 

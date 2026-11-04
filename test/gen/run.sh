@@ -226,6 +226,10 @@ run_case gen-help-02   local "field:tasks"                   "+gen help 总览�
   "$THCLI" +gen help
 run_case gen-help-03   local "field:thcli +gen status wand/vidu/text-to-video" "异步接口帮助给出查询命令" \
   "$THCLI" +gen wand/vidu/text-to-video --help
+run_case gen-help-04   local "field:--input-url"             "Tenlai 异步 ASR 帮助含二选一字段" \
+  "$THCLI" +gen tenlai/asrproxy/create_rec_task --help
+run_case gen-help-05   local "field:--styles"                "Mureka easy 帮助含风格枚举" \
+  "$THCLI" +gen wand/mureka-music/easy-generation --help
 run_case gen-status-01 local "fail:--param"                  "status 不收 --param" \
   "$THCLI" +gen status wand/vidu/text-to-video x --param a=1
 run_case gen-tasks-01  local "fail:--limit"                  "tasks --limit 非正整数被拦" \
@@ -367,6 +371,12 @@ run_case aud-asr-03  local "fail:只收公网 URL"  "asr 异步本地拦截（�
   "$THCLI" +gen wand/asrproxy/async_create --model hy-asr-3.0-preview --input-url "$WAV" --subtitle-format srt
 run_case aud-asr-05  server "field:source"                  "asr 同步本地 --data + --source" \
   "$THCLI" +gen wand/asrproxy/sync_transcribe --model hy-asr-3.0-preview --data "$WAV" --source zh --verbose
+run_case aud-tenlai-01 server "field:input_url"             "天籁 ASR URL 提交（异步）" \
+  "$THCLI" +gen tenlai/asrproxy/create_rec_task --input-url "$WAV30_URL" --no-wait --verbose
+run_case aud-tenlai-02 local  "fail:之一"                   "天籁 ASR 缺二选一" \
+  "$THCLI" +gen tenlai/asrproxy/create_rec_task
+run_case aud-tenlai-03 body   "field:data"                  "天籁 ASR 本地文件 Base64" \
+  "$THCLI" +gen tenlai/asrproxy/create_rec_task --data "$WAV" --verbose
 run_case aud-tts-01  server "field:voice_setting"           "TTS 基础合成" \
   "$THCLI" +gen wand/minimax-tts/sync_tts --model minimax-speech-2.8-hd --text 你好世界 --voice-setting '{"voice_id":"male-qn-qingse"}' --verbose
 run_case aud-tts-02  local "fail:--voice-setting 必填" "TTS 缺 voice_setting" \
@@ -397,6 +407,12 @@ run_case aud-clone-03 server "field:voice_id"               "clone --voice-id" \
   "$THCLI" +gen wand/minimax-tts/sync_clone --model minimax-voice-clone --audio-data "$REF" --voice-id "thcli_case_$(date +%m%d%H%M%S)" --verbose
 run_case aud-clone-06 server "field:accuracy"               "clone --accuracy" \
   "$THCLI" +gen wand/minimax-tts/sync_clone --model minimax-voice-clone --audio-data "$REF" --accuracy 0.8 --verbose
+run_case aud-clone-09 body   "field:file_id"                "clone --file-id（三选一新增）" \
+  "$THCLI" +gen wand/minimax-tts/sync_clone --file-id 123 --verbose
+run_case aud-clone-10 local  "fail:之一"                    "clone 缺三选一（url/data/file_id）" \
+  "$THCLI" +gen wand/minimax-tts/sync_clone --model minimax-voice-clone --voice-id thcli_x
+run_case aud-tts-13  body    "field:stream"                 "TTS --stream（SSE 流式，CLI 拼接）" \
+  "$THCLI" +gen wand/minimax-tts/sync_tts --model minimax-speech-2.8-hd --text 你好 --voice-setting '{"voice_id":"male-qn-qingse"}' --stream true --verbose
 run_case aud-design-06 local "fail:--prompt 必填"           "design 缺描述" \
   "$THCLI" +gen wand/minimax-tts/sync_design --model minimax-voice-design --preview-text 你好
 run_case aud-design-01 server "field:preview_text"          "design 基础" \
@@ -415,16 +431,22 @@ run_case aud-mm-04    server "field:is_instrumental"        "minimax-music --is-
   "$THCLI" +gen wand/minimax-music/generation --model minimax-music-v3.0 --prompt 钢琴 --is-instrumental true --verbose
 run_case aud-mm-03    server "field:lyrics_optimizer"       "minimax-music --lyrics-optimizer" \
   "$THCLI" +gen wand/minimax-music/generation --model minimax-music-v3.0 --prompt 歌 --lyrics-optimizer true --verbose
-run_case aud-mureka-02 server "field:gender"                "mureka --lyrics --gender" \
+run_case aud-mureka-01 server "field:styles"                "easy --styles（提示词成曲）" \
+  "$THCLI" +gen wand/mureka-music/easy-generation --model mureka-music-v9 --prompt 一首明亮夏日氛围的情歌 --styles '["pop","rock"]' --n 1 --verbose
+run_case aud-mureka-02 server "field:gender"                "generation --lyrics --gender" \
   "$THCLI" +gen wand/mureka-music/generation --model mureka-music-v9 --prompt 清新民谣 --lyrics '[Verse] 夏天的风' --gender female --n 1 --verbose
 run_case aud-mureka-03 server "field:n"                     "mureka --n" \
   "$THCLI" +gen wand/mureka-music/generation --model mureka-music-v9 --lyrics '[Verse] 夏天的风' --n 1 --verbose
-run_case aud-mureka-05 local  "fail:--lyrics 必填"          "mureka 只传提示词本地拦（只支持歌词成曲）" \
-  "$THCLI" +gen wand/mureka-music/generation --model mureka-music-v9 --prompt 夏日情歌 --styles '["pop","rock"]' --n 1
-run_case aud-mureka-01 server "field:styles"                "mureka --styles" \
-  "$THCLI" +gen wand/mureka-music/generation --model mureka-music-v9 --lyrics '[Verse] 夏天的风' --styles '["r&b"]' --n 1 --verbose
+run_case aud-mureka-05 local  "fail:--lyrics 必填"          "generation 只传提示词本地拦（歌词成曲需 lyrics）" \
+  "$THCLI" +gen wand/mureka-music/generation --model mureka-music-v9 --prompt 夏日情歌 --n 1
+run_case aud-mureka-06 server "field:prompt"                "instrumental 纯音乐" \
+  "$THCLI" +gen wand/mureka-music/instrumental-generation --model mureka-music-v9 --prompt 'lo-fi, cozy, warm piano' --n 1 --verbose
 run_case aud-mureka-07 local "fail:--lyrics 必填"           "mureka 缺歌词" \
   "$THCLI" +gen wand/mureka-music/generation --model mureka-music-v9
+run_case aud-mureka-08 body   "field:prompt"                "easy 最小调用（--prompt 必填）" \
+  "$THCLI" +gen wand/mureka-music/easy-generation --model mureka-music-v9 --prompt 明亮夏日 --n 1 --verbose
+run_case aud-mureka-09 local  "fail:unknown option"         "generation 无 --styles（已挪到 easy）" \
+  "$THCLI" +gen wand/mureka-music/generation --model mureka-music-v9 --lyrics '[Verse] x' --styles '["pop"]' --n 1
 
 # ================= 通用命令 =================
 echo "-- 通用 --"
@@ -520,12 +542,23 @@ run_case real-asr-01  real ok "ASR 同步（本地中文 10s）" \
   "$THCLI" +gen wand/asrproxy/sync_transcribe --model hy-asr-3.0-preview --data "$WAV" --output "$R_OUT/real-asr-01"
 run_case real-asr-02  real ok "ASR 异步字幕（中文 30s URL）" \
   "$THCLI" +gen wand/asrproxy/async_create --model hy-asr-3.0-preview --input-url "$WAV30_URL" --subtitle-format srt --no-wait
+run_case real-tenlai-01 real ok "天籁 ASR 异步转写（中文 30s URL）" \
+  "$THCLI" +gen tenlai/asrproxy/create_rec_task --input-url "$WAV30_URL" --output "$R_OUT/real-tenlai-01"
 run_case real-tts-01  real ok "TTS 合成" \
   "$THCLI" +gen wand/minimax-tts/sync_tts --model minimax-speech-2.8-hd --text 你好世界 --voice-setting '{"voice_id":"male-qn-qingse"}' --output "$R_OUT/real-tts-01"
 run_case real-clone-01 real ok "声音复刻（本地 6s 参考音）" \
   "$THCLI" +gen wand/minimax-tts/sync_clone --model minimax-voice-clone --audio-data "$REF" --voice-id "thcli_test_$(date +%m%d%H%M%S)" --output "$R_OUT/real-clone-01"
 run_case real-dub-01  real ok "AI 配音（中文视频 → 英文）" \
   "$THCLI" +gen wand/dubbing/async_generation --model wand-dubbing-clone-v1 --input-url "$DUB_URL" --dst-language en --no-wait
+run_case real-mureka-01 real ok "Mureka 歌词成曲（n=1）" \
+  "$THCLI" +gen wand/mureka-music/generation --model mureka-music-v9 --prompt "pop, emotional" --lyrics '[Verse]
+夜色里的城市灯火
+[Chorus]
+灯火 照亮我' --n 1 --output "$R_OUT/real-mureka-01"
+run_case real-mureka-02 real ok "Mureka 提示词成曲（easy，n=1）" \
+  "$THCLI" +gen wand/mureka-music/easy-generation --model mureka-music-v9 --prompt 一首明亮夏日氛围、带有抓耳副歌的情歌 --styles '["pop"]' --n 1 --output "$R_OUT/real-mureka-02"
+run_case real-mureka-03 real ok "Mureka 纯音乐（instrumental，n=1）" \
+  "$THCLI" +gen wand/mureka-music/instrumental-generation --model mureka-music-v9 --prompt "lo-fi, cozy, warm piano and soft drums" --n 1 --output "$R_OUT/real-mureka-03"
 
 # ================= res（资源链路：生成产物 → 创建资源 → 再用于生成，顺序执行，扣费） =================
 # 依赖：real-img-01/02 的产物图（创建主体）与 6s 参考音素材（创建音色，Kling 要求参考音频 ≥5s）；体现「生成的资源用于生成其他内容」
@@ -609,6 +642,8 @@ run_case doc-model-01  local ok "doctor model（hy-image-v3）" \
   "$THCLI" doctor model --id hy-image-v3
 run_case doc-model-02  local ok "doctor model（kling-video-v3-turbo）" \
   "$THCLI" doctor model --id kling-video-v3-turbo
+run_case doc-model-03  local ok "doctor model（tenlai-asr-v1.0，新模型进模型广场体检）" \
+  "$THCLI" doctor model --id tenlai-asr-v1.0
 
 # ================= act（models activate 遍历全部 +gen 模型，真实写操作） =================
 if [ "$MODE" = all ] && [ "$DRY_RUN" != 1 ] && [ -z "$ONLY" ]; then
@@ -639,6 +674,8 @@ fi
 echo "-- 负边界（status/tasks）--"
 run_case neg-status-01 local "fail:本机没有任务" "status 查不存在的任务" \
   "$THCLI" +gen status wand/vidu/text-to-video e2e-not-exist-999
+run_case neg-status-02 local "fail:本机没有任务" "status 查 Tenlai 不存在任务（接口路由到 POST 查询）" \
+  "$THCLI" +gen status tenlai/asrproxy/create_rec_task e2e-not-exist-999
 run_case neg-tasks-01  local "fail:--limit 需要正整数" "tasks --limit abc" \
   "$THCLI" +gen tasks --limit abc
 # activate 无参是友好提示（exit 0），run_case 的 fail 断言要求 exit≠0，改为 shell 级验证

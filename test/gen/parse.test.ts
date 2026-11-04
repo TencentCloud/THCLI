@@ -124,6 +124,23 @@ describe("响应归一化（用文档示例响应）", () => {
     assert.equal(f.parse({ status: "completed", output: {} }).state, "failed");
   });
 
+  it("Tenlai 异步 ASR：output.text 转写 + audio_duration 元数据；数字任务 id、查询走 POST body（与 wand/asrproxy 的 GET 不同）", () => {
+    const f = familyOf("tenlai-asr-v1.0")!;
+    const r = f.parse({ request_id: "r", id: 17256336078, status: "completed", output: { text: "转写正文" }, audio_duration: 30 });
+    assert.deepEqual([r.state, r.texts, r.urls], ["succeeded", ["转写正文"], []]);
+    assert.deepEqual(r.meta, { audio_duration: "30" });
+    assert.equal(f.parse({ id: 1, status: "queued" }).state, "queued");
+    assert.equal(f.parse({ id: 1, status: "in_progress" }).state, "running");
+    assert.equal(f.parse({ id: 1, status: "failed", error: { message: "bad audio" } }).error, "bad audio");
+    assert.equal(f.parse({ id: 1, status: "completed", output: {} }).state, "failed");
+    assert.equal(f.taskIdOf!({ id: 17256336078 }), "17256336078", "数字 id 归一为字符串");
+    assert.deepEqual(f.query!("tenlai-asr-v1.0", "17256336078"), {
+      method: "POST",
+      path: "/v1/tenlai/asrproxy/describe_task_status",
+      body: { model: "tenlai-asr-v1.0", task_id: 17256336078 },
+    });
+  });
+
   it("TTS：hex 音频转 data URL；MiniMax base_resp 非 0 视为失败", () => {
     const f = familyOf("minimax-speech-2.8-hd")!;
     const good = f.parse({ data: { audio: "616263" }, extra_info: { audio_format: "wav" } });

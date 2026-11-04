@@ -104,8 +104,10 @@ export interface ParamSpec {
   models?: string[];
   /** 字段值可以是本地文件时的编码规则；数组 = 不同子路径不同规则（如 vidu subjects：images 可本地、videos 仅 URL） */
   media?: MediaSpec | MediaSpec[];
-  /** flag 未传时仍写入请求体的默认值（如 minimax 音频的 output_format=url：hex 内联 base64，长音频会超响应体上限被上游拒）。全模型统一且不得与 models 同用；未来需按模型分派时，改为 model→value 并把注入挪到最终 model 确定之后 */
-  default?: string | number | boolean;
+  /** flag 未传时仍写入请求体的默认值（如 minimax 音频的 output_format=url：hex 内联 base64，长音频会超响应体上限被上游拒）。
+   *  函数形式接收同一接口里排在前面、已收集的请求体字段（如 sync_tts 的 stream=true 时不注入 url——流式仅支持 hex），返回 undefined 表示本次不注入。
+   *  全模型统一且不得与 models 同用；未来需按模型分派时，改为 model→value 并把注入挪到最终 model 确定之后 */
+  default?: string | number | boolean | ((body: Obj) => string | number | boolean | undefined);
 }
 
 type Obj = Record<string, unknown>;
@@ -285,6 +287,13 @@ function exactlyOne(body: Obj, keys: string[], what: string): string | undefined
   if (n === 1) return undefined;
   const flags = keys.map((k) => `--${k.replace(/_/g, "-")}`).join(" / ");
   return t(n === 0 ? "gen.check.needOne" : "gen.check.onlyOne", { what, flags });
+}
+
+/** 至少一个（文档「或 … 或 … 至少传一个」形态）：全缺才报错，多个并存交给上游裁决 */
+function atLeastOne(body: Obj, keys: string[], what: string): string | undefined {
+  return keys.some((k) => has(body, k))
+    ? undefined
+    : t("gen.check.needOne", { what, flags: keys.map((k) => `--${k.replace(/_/g, "-")}`).join(" / ") });
 }
 
 // ---------------------------------------------------------------- 参数声明工具
@@ -1548,6 +1557,40 @@ const ASR: FamilySpec = {
 
 const ASR_SOURCE = S("source", T("识别语种（缺省自动检测）", "Source language (auto-detected if absent)"));
 
+/**
+ * 天籁异步语音识别（Tenlai）：中英 + 31 种方言混合引擎，长音频（≤5 小时）转写。
+ * 提交（input_url / data 二选一）返回数字任务 id；查询走 POST body（与 wand/asrproxy 的 GET 路径不同），
+ * 结果在 output.text（带时间戳分行的全文），audio_duration 为音频总时长（秒）。
+ */
+const TENLAI_ASR: FamilySpec = {
+  id: "tenlai-asr",
+  kind: "audio",
+  models: ["tenlai-asr-v1.0"],
+  sync: false,
+  doc: "https://cloud.tencent.com/document/product/1823/140154",
+  apis: {
+    create_rec_task: {
+      params: [
+        S("input_url", T("音视频文件公网 URL（≤5 小时；与 --data 二选一）", "Audio/video public URL (<=5h; either this or --data)"), { media: MEDIA("urlOnly") }),
+        S("data", T("音频 Base64（可传本地文件；与 --input-url 二选一）", "Audio Base64 (local file allowed; either this or --input-url)"), { media: MEDIA("raw") }),
+      ],
+      validateBody: (body) => exactlyOne(body, ["input_url", "data"], "create_rec_task"),
+    },
+  },
+  taskIdOf: (resp) => str(resp["id"]),
+  // 文档示例的任务 id 是数字（17256336078）：提交时存字符串、查询时转回数字
+  query: (model, id) => ({ method: "POST", path: "/v1/tenlai/asrproxy/describe_task_status", body: { model, task_id: Number(id) } }),
+  parse: (resp) => {
+    const state = normalizeState(resp["status"]);
+    if (state !== "succeeded") return result(state, [], resp);
+    const out = (resp["output"] ?? {}) as Obj;
+    const text = str(out["text"]);
+    if (!text) return audioFailed(resp, t("gen.result.noText"));
+    const duration = resp["audio_duration"];
+    return { state: "succeeded", urls: [], extraUrls: [], texts: [text], meta: typeof duration === "number" ? { audio_duration: String(duration) } : undefined };
+  },
+};
+
 const ASR_SYNC_PARAMS: ParamSpec[] = [
   S("input_url", T("音视频文件公网 URL（≤100MB / ≤30 分钟；与 data 二选一）", "Audio/video public URL (<=100MB / <=30min; either this or data)"), { media: MEDIA("urlOnly") }),
   S("data", T("音频 Base64（可传本地文件，≤75MB；与 input_url 二选一）", "Audio Base64 (local file allowed, <=75MB; either this or input_url)"), { media: MEDIA("raw", undefined, { maxBytes: 75_000_000 }) }),
@@ -1604,10 +1647,19 @@ const TTS: FamilySpec = {
     ]),
     B("subtitle_enable", T("开启字幕（默认 false）", "Enable subtitles (default false)")),
     S("subtitle_type", T("字幕粒度（默认 sentence）", "Subtitle granularity (default sentence)"), { choices: ["sentence", "word"] }),
-    S("output_format", T("返回形式：url 由 CLI 直接下载，长音频不受响应体上限限制；hex 内联 base64，长文本可能报 response size too large", "Output form: url is downloaded directly and long audio stays within the response limit; hex inlines base64 and may hit response size too large"), { choices: ["hex", "url"], default: "url" }),
+    B("stream", T("SSE 流式返回（默认 false；建议输入超过 5000 字符时开启，音频分段返回由 CLI 自动拼接为完整文件；流式仅支持 hex 输出）", "SSE streaming (default false; recommended for inputs over 5000 chars; audio chunks are stitched into one file by the CLI; streaming output is hex only)")),
+    S("output_format", T("返回形式（非流式默认 url，CLI 直接下载；hex 内联 base64，长文本可能报 response size too large；--stream 流式固定 hex 分段）", "Output form (url by default when not streaming, downloaded by the CLI; hex inlines base64 and may hit response size too large; --stream always streams hex chunks)"), {
+      choices: ["hex", "url"],
+      // 上游约束：流式仅支持 hex（url 会被拒 400），stream=true 时不注入 url 默认
+      default: (body) => (body["stream"] === true ? undefined : "url"),
+    }),
     B("aigc_watermark", T("末尾添加音频节奏标识（默认 false）", "Append an audio watermark (default false)")),
   ],
   doc: "https://cloud.tencent.com/document/product/1823/135796",
+  validateBody: (body) => {
+    if (body["stream"] === true && body["output_format"] === "url") return t("gen.rule.minimaxTts.streamHexOnly");
+    return undefined;
+  },
   parse: (resp) => {
     const envError = minimaxErrorOf(resp);
     if (envError) return { state: "failed", urls: [], extraUrls: [], error: envError };
@@ -1628,8 +1680,8 @@ const VOICE_CLONE: FamilySpec = {
   models: ["minimax-voice-clone"],
   sync: true,
   params: [
-    S("audio_url", T("待复刻音频公网 URL（与 audio_data 二选一；mp3/m4a/wav，建议 10 秒~5 分钟，≤20MB）", "Source audio public URL (either this or audio_data; mp3/m4a/wav, 10s~5min recommended, <=20MB)"), { media: MEDIA("urlOnly") }),
-    S("audio_data", T("待复刻音频 Base64（可传本地文件：mp3/m4a/wav，≤20MB；与 audio_url 二选一）", "Source audio Base64 (local file allowed: mp3/m4a/wav, <=20MB; either this or audio_url)"), {
+    S("audio_url", T("待复刻音频公网 URL（mp3/m4a/wav，建议 10 秒~5 分钟，≤20MB；与 audio_data / file_id 至少传一个）", "Source audio public URL (mp3/m4a/wav, 10s~5min recommended, <=20MB; at least one of audio_url / audio_data / file_id)"), { media: MEDIA("urlOnly") }),
+    S("audio_data", T("待复刻音频 Base64（可传本地文件：mp3/m4a/wav，≤20MB；与 audio_url / file_id 至少传一个）", "Source audio Base64 (local file allowed: mp3/m4a/wav, <=20MB; at least one of audio_url / audio_data / file_id)"), {
       media: MEDIA("raw", undefined, { formats: ["mp3", "m4a", "wav"], maxBytes: 20_000_000 }),
     }),
     N("file_id", T("已上传复刻音频的文件 ID（与 audio_url / audio_data 三选一）", "Uploaded source-audio file ID (one of audio_url / audio_data / file_id)")),
@@ -1641,10 +1693,7 @@ const VOICE_CLONE: FamilySpec = {
     S("output_format", T("试听音频返回形式", "Preview audio form"), { choices: ["hex", "url"], default: "url" }),
   ],
   doc: "https://cloud.tencent.com/document/product/1823/135798",
-  validateBody: (body) =>
-    ["audio_url", "audio_data", "file_id"].every((k) => !has(body, k))
-      ? t("gen.check.needOne", { what: "voice clone", flags: "--audio-url / --audio-data / --file-id" })
-      : undefined,
+  validateBody: (body) => atLeastOne(body, ["audio_url", "audio_data", "file_id"], "voice clone"),
   parse: (resp) => {
     const envError = minimaxErrorOf(resp);
     if (envError) return { state: "failed", urls: [], extraUrls: [], error: envError };
@@ -1745,37 +1794,73 @@ const MINIMAX_MUSIC: FamilySpec = {
   },
 };
 
-/** Mureka 歌词上限 */
+/** Mureka 歌词上限（歌词成曲） */
 const MUREKA_LYRICS_MAX = 5000;
 
 /** MiniMax 音乐歌词上限 */
 const MINIMAX_MUSIC_LYRICS_MAX = 3500;
 
+/** Mureka 提示词上限：歌词成曲的风格提示词与纯音乐提示词 1024；提示词成曲 2000 */
+const MUREKA_PROMPT_MAX = 1024;
+
+/** Mureka 生成数量：三接口共用，默认 2 且按首计费 */
+const MUREKA_N = N("n", T("生成数量 [1, 3]（默认 2，按首计费）", "Track count [1, 3] (default 2, billed per track)"));
+
 /**
- * 音乐生成 Mureka（同步）：目前只支持歌词成曲，--lyrics 必填。
- * 服务端对所有请求都要求 lyrics（缺了返回 "Lyrics is required"），提示词成曲不可用；纯音乐经确认暂不支持，不提供开关。
- * 歌词成曲的风格提示词上限 1024 字符（maxPromptChars）。
+ * 音乐生成 Mureka（同步）：同一模型 mureka-music-v9，三种能力按接口区分——
+ *   generation              歌词成曲（--lyrics 必填，风格提示词 ≤1024）
+ *   easy-generation         提示词成曲（--prompt 必填 ≤2000，--styles 风格枚举）
+ *   instrumental-generation 纯音乐（--prompt 必填 ≤1024）
+ * 输出统一为 choices[].url（临时地址 12 小时）；n 默认 2 按首计费，仅需 1 首显式传 --n 1。
  */
 const MUREKA_MUSIC: FamilySpec = {
   id: "mureka-music",
-  maxPromptChars: 1024,
+  // 族级上限取各接口最大（提示词成曲 2000）；歌词成曲 / 纯音乐的 1024 在接口级 validateBody 精确校验
+  maxPromptChars: 2000,
   kind: "audio",
   models: ["mureka-music-v9"],
   sync: true,
-  params: [
-    S("lyrics", T("歌词（≤5000 字符，可用 [Verse]/[Chorus] 等分段标签）", "Lyrics (<=5000 chars, section tags like [Verse]/[Chorus])"), { required: true }),
-    S("prompt", T("风格提示词（≤1024 字符，如 pop, emotional, female vocal）", "Style prompt (<=1024 chars, e.g. pop, emotional, female vocal)")),
-    S("gender", T("人声性别倾向", "Vocal gender"), { choices: ["female", "male"] }),
-    N("n", T("生成数量 [1, 3]（默认 2，按量计费）", "Track count [1, 3] (default 2, billed per track)")),
-  ],
+  apis: {
+    generation: {
+      params: [
+        S("lyrics", T("歌词（≤5000 字符，可用 [Intro]/[Verse]/[Pre-Chorus]/[Chorus]/[Bridge]/[Outro] 分段标签）", "Lyrics (<=5000 chars, section tags like [Intro]/[Verse]/[Chorus]/[Bridge]/[Outro])"), { required: true }),
+        S("prompt", T("风格提示词（≤1024 字符，如 pop, emotional, female vocal）", "Style prompt (<=1024 chars, e.g. pop, emotional, female vocal)")),
+        S("gender", T("人声性别倾向", "Vocal gender"), { choices: ["female", "male"] }),
+        MUREKA_N,
+      ],
+      validateBody: (body) => {
+        const lyrics = str(body["lyrics"]) ?? "";
+        if ([...lyrics].length > MUREKA_LYRICS_MAX) return t("gen.rule.mureka.lyricsTooLong", { len: [...lyrics].length, max: MUREKA_LYRICS_MAX });
+        const prompt = str(body["prompt"]) ?? "";
+        if ([...prompt].length > MUREKA_PROMPT_MAX) return t("gen.rule.mureka.promptTooLong", { len: [...prompt].length, max: MUREKA_PROMPT_MAX });
+        return undefined;
+      },
+    },
+    "easy-generation": {
+      params: [
+        S("prompt", T("提示词（描述歌曲内容、情绪与画面感，模型自动作词作曲演唱，≤2000 字符）", "Prompt describing the song's content, mood and imagery (<=2000 chars); the model writes lyrics and sings"), { required: true }),
+        A("styles", T("风格枚举（pop/rock/jazz/r&b/edm/ambient/folk/latin/k-pop/j-pop/house/gospel/lo-fi，可选多个）", "Style enums (pop/rock/jazz/r&b/edm/ambient/folk/latin/k-pop/j-pop/house/gospel/lo-fi, multiple allowed)")),
+        MUREKA_N,
+      ],
+    },
+    "instrumental-generation": {
+      params: [
+        S("prompt", T("纯音乐提示词（风格与场景，无人声，≤1024 字符）", "Instrumental prompt (style and scene, no vocals, <=1024 chars)"), { required: true }),
+        MUREKA_N,
+      ],
+      validateBody: (body) => {
+        const prompt = str(body["prompt"]) ?? "";
+        if ([...prompt].length > MUREKA_PROMPT_MAX) return t("gen.rule.mureka.promptTooLong", { len: [...prompt].length, max: MUREKA_PROMPT_MAX });
+        return undefined;
+      },
+    },
+  },
   doc: "https://cloud.tencent.com/document/product/1823/138805",
   requestNote: T(
-    '目前只支持歌词成曲（--lyrics 必填，只传提示词会返回 Lyrics is required）：\n--lyrics $\'[Verse]\\n夏天的风\\n[Chorus]\\n吹过海边\' --prompt "pop, emotional, female vocal" --n 1\n纯音乐：thcli +gen wand/minimax-music/generation --model minimax-music-v3.0 --prompt "轻快的钢琴曲" --is-instrumental true\n无歌词成曲（自动写词）：thcli +gen wand/minimax-music/generation --model minimax-music-v3.0 --prompt "夏日情歌" --lyrics-optimizer true',
-    'Only songs from lyrics are supported for now (--lyrics is required; a prompt alone returns "Lyrics is required"):\n--lyrics $\'[Verse]\\nsummer breeze\\n[Chorus]\\nover the sea\' --prompt "pop, emotional, female vocal" --n 1\nInstrumental: thcli +gen wand/minimax-music/generation --model minimax-music-v3.0 --prompt "light piano" --is-instrumental true\nSong without lyrics (auto-written): thcli +gen wand/minimax-music/generation --model minimax-music-v3.0 --prompt "summer love song" --lyrics-optimizer true',
+    '同一模型三种能力，按接口区分（提示词上限不同：歌词成曲风格提示词 / 纯音乐 1024，提示词成曲 2000）：\n歌词成曲：--lyrics $\'[Verse]\\n夏天的风\\n[Chorus]\\n吹过海边\' --prompt "pop, emotional, female vocal" --n 1\n提示词成曲：thcli +gen wand/mureka-music/easy-generation --prompt "一首明亮夏日氛围的情歌" --styles \'["pop"]\' --n 1\n纯音乐：thcli +gen wand/mureka-music/instrumental-generation --prompt "lo-fi, cozy, warm piano" --n 1',
+    'One model, three capabilities, distinguished by api (prompt limits differ: 1024 for the style prompt of lyrics-to-song and for instrumental, 2000 for prompt-to-song):\nLyrics to song: --lyrics $\'[Verse]\\nsummer breeze\\n[Chorus]\\nover the sea\' --prompt "pop, emotional, female vocal" --n 1\nPrompt to song: thcli +gen wand/mureka-music/easy-generation --prompt "a bright summer love song" --styles \'["pop"]\' --n 1\nInstrumental: thcli +gen wand/mureka-music/instrumental-generation --prompt "lo-fi, cozy, warm piano" --n 1',
   ),
   validateBody: (body) => {
-    const lyrics = str(body["lyrics"]) ?? "";
-    if ([...lyrics].length > MUREKA_LYRICS_MAX) return t("gen.rule.mureka.lyricsTooLong", { len: [...lyrics].length, max: MUREKA_LYRICS_MAX });
     const n = body["n"];
     if (n !== undefined && !(Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 3)) return t("gen.rule.mureka.badN", { n: JSON.stringify(n) });
     return undefined;
@@ -1805,6 +1890,7 @@ export const FAMILIES: FamilySpec[] = [
   WORLD2_PANORAMA,
   WORLD2_SCENE,
   ASR,
+  TENLAI_ASR,
   TTS,
   VOICE_CLONE,
   VOICE_DESIGN,
@@ -1970,7 +2056,7 @@ export function paramHelpText(p: ParamSpec): string {
   const notes: string[] = [];
   if (p.required === true) notes.push(zh ? "必填" : "required");
   else if (Array.isArray(p.required)) notes.push(zh ? `${p.required.join(" / ")} 必填` : `required for ${p.required.join(" / ")}`);
-  if (p.default !== undefined) notes.push(zh ? `默认 ${String(p.default)}` : `default ${String(p.default)}`);
+  if (p.default !== undefined && typeof p.default !== "function") notes.push(zh ? `默认 ${String(p.default)}` : `default ${String(p.default)}`);
   if (p.models) notes.push(zh ? `仅 ${p.models.join(" / ")}` : `${p.models.join(" / ")} only`);
   if (p.media) {
     const specs = Array.isArray(p.media) ? p.media : [p.media];
@@ -2173,12 +2259,15 @@ export const APIS: ApiRef[] = [
     validateBody: (body) => exactlyOne(body, ["input_url", "data"], "sync_transcribe"),
   }),
   apiRefOf({ id: "wand/asrproxy/async_create", family: ASR, params: ASR_ASYNC_PARAMS }),
+  apiRefOf({ id: "tenlai/asrproxy/create_rec_task", family: TENLAI_ASR, apiName: "create_rec_task" }),
   apiRefOf({ id: "wand/minimax-tts/sync_tts", family: TTS }),
   apiRefOf({ id: "wand/minimax-tts/sync_clone", family: VOICE_CLONE }),
   apiRefOf({ id: "wand/minimax-tts/sync_design", family: VOICE_DESIGN }),
   apiRefOf({ id: "wand/dubbing/async_generation", family: DUB }),
   apiRefOf({ id: "wand/minimax-music/generation", family: MINIMAX_MUSIC }),
-  apiRefOf({ id: "wand/mureka-music/generation", family: MUREKA_MUSIC }),
+  apiRefOf({ id: "wand/mureka-music/generation", family: MUREKA_MUSIC, apiName: "generation" }),
+  apiRefOf({ id: "wand/mureka-music/easy-generation", family: MUREKA_MUSIC, apiName: "easy-generation" }),
+  apiRefOf({ id: "wand/mureka-music/instrumental-generation", family: MUREKA_MUSIC, apiName: "instrumental-generation" }),
 ];
 
 /** 按接口 ID 找接口 */

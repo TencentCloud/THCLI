@@ -1121,6 +1121,8 @@ export const ZH: Messages = {
   "gen.rule.minimaxMusic.needLyrics": "带人声的歌曲须传 --lyrics（或 --lyrics-optimizer true 加 --prompt；纯音乐用 --is-instrumental true 加 --prompt）",
   "gen.rule.minimaxMusic.lyricsTooLong": "--lyrics 共 {len} 字符，超过 {max} 字符上限",
   "gen.rule.mureka.lyricsTooLong": "--lyrics 共 {len} 字符，超过 {max} 字符上限",
+  "gen.rule.mureka.promptTooLong": "--prompt 共 {len} 字符，超过 {max} 字符上限",
+  "gen.rule.minimaxTts.streamHexOnly": "--stream 流式模式仅支持 hex 分段输出（--output-format url 会被上游拒绝），请去掉 --output-format 或改为 hex",
   "gen.rule.mureka.badN": "--n 须为 [1, 3] 内的整数，收到 {n}",
   "gen.result.noUrl": "响应里没有结果 URL",
   "gen.result.statusFailed": "服务返回 status={status}",

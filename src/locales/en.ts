@@ -1125,6 +1125,8 @@ export const EN: Messages = {
   "gen.rule.minimaxMusic.needLyrics": "vocal songs require --lyrics (or --lyrics-optimizer true with --prompt; instrumental: --is-instrumental true with --prompt)",
   "gen.rule.minimaxMusic.lyricsTooLong": "--lyrics is {len} characters, exceeding the {max}-character limit",
   "gen.rule.mureka.lyricsTooLong": "--lyrics is {len} characters, exceeding the {max}-character limit",
+  "gen.rule.mureka.promptTooLong": "--prompt is {len} characters, exceeding the {max}-character limit",
+  "gen.rule.minimaxTts.streamHexOnly": "streaming (--stream) only supports hex chunks; drop --output-format or set it to hex",
   "gen.rule.mureka.badN": "--n must be an integer in [1, 3], got {n}",
   "gen.result.noUrl": "no result url in response",
   "gen.result.statusFailed": "the service reported status={status}",
