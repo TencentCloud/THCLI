@@ -7,6 +7,21 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 生成
+
+- **`+gen wand/vega-videos/tasks`（WAND 视频）`content` 素材放宽**：`image_url` / `audio_url` 支持本地文件，自动编码为 data URL（实测上游接受：image 出片、audio 解码并校验时长 2000~15000 ms）；`video_url` 实测被上游明确拒绝（400："video_url does not support inline base64; use a public URL"），维持仅公网 URL；裸 Base64（无 `data:` 前缀）提交即 400。
+
+### 修复
+
+- **`+gen wand/asrproxy/sync_transcribe` 的 `data` 补大小上限**：≤75MB（原实现无任何限制）；`input_url` 描述补 ≤100MB / ≤30 分钟。
+- **`kling-video-v3-turbo` 图生视频允许尾帧**：素材白名单补 `last_frame`（TokenPlan 表格最终版 9-23）。
+- **Vidu `subjects[].videos` 仅 q2-pro**：非 q2-pro 模型本地先拦。
+- **Vidu 接口覆盖对齐表格**：`q3`/`q2` 补图生与首尾帧接口、`q2-turbo` 补多图参考生视频。
+- **`IMAGE_MIME` 补 tiff/tif/heic/heif 映射**：Seedream 本地 tiff/heic/heif 文件原被误拒（白名单声明了格式但 MIME 表缺条目）。
+- **world2-panorama 参数改名 `images[]` → `image_url`**（单值、仅 URL；对齐 TokenPlan 表格与 world2-scene 姊妹接口）。
+- **WAND_IMAGE（vega 生图）`input` 描述补 0~10 张上限**（原为全库唯一未写张数的参考图参数）。
 ## [1.0.2] - 2026-10-28
 
 ### 新增

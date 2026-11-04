@@ -334,8 +334,12 @@ run_case vid-mm2-04  server "field:prompt_expansion_mode"   "minimax-h3 --extra"
   "$THCLI" +gen wand/minimax-video-v2/generation --model minimax-video-h3 --content '[{"type":"text","text":"猫"}]' --ratio 16:9 --resolution 768P --duration 6 --extra '{"prompt_expansion_mode":"quality"}' --no-wait --verbose
 run_case vid-wand-02 server "field:return_last_frame"       "wand-video --options" \
   "$THCLI" +gen wand/vega-videos/tasks --model wand-vega-video-1.0-lite --content '[{"type":"text","text":"猫"}]' --options '{"return_last_frame":true}' --no-wait --verbose
-run_case vid-wand-03 local "fail:只收公网 URL"  "wand-video 本地图拦截（只收 URL）" \
-  "$THCLI" +gen wand/vega-videos/tasks --model wand-vega-video-1.0-lite --content "[{\"type\":\"image_url\",\"image_url\":{\"url\":\"$CAT\"}}]"
+run_case vid-wand-03 local "fail:只收公网 URL"  "wand-video video_url 本地拦截（图片/音频放宽为 data URL）" \
+  "$THCLI" +gen wand/vega-videos/tasks --model wand-vega-video-1.0-lite --content "[{\"type\":\"video_url\",\"video_url\":{\"url\":\"$CAT\"}}]"
+run_case vid-wand-04 server "field:content"       "wand-video 本地图片首帧（data URL 放宽后提交）" \
+  "$THCLI" +gen wand/vega-videos/tasks --model wand-vega-video-1.0-lite --content "[{\"type\":\"text\",\"text\":\"猫伸懒腰\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"$CAT\"},\"role\":\"first_frame\"}]" --no-wait --verbose
+run_case vid-wand-05 body   "field:audio_url"     "wand-video 本地音频编码（data URL；时长须 2~15s）" \
+  "$THCLI" +gen wand/vega-videos/tasks --model wand-vega-video-1.0-lite --content "[{\"type\":\"text\",\"text\":\"猫\"},{\"type\":\"audio_url\",\"audio_url\":{\"url\":\"$A/audio/commons-en-speech.mp3\"},\"role\":\"reference_audio\"}]"
 # ================= 3d =================
 echo "-- 3d --"
 run_case 3d-hy-03   server "field:enable_pbr"               "hy-3d --enable-pbr" \
@@ -349,7 +353,7 @@ run_case 3d-hy-08   server "field:multi_view_images"        "hy-3d --multi-view-
 run_case 3d-hy-09   local "fail:--face-count 仅" "hy-3d express 不收 face_count" \
   "$THCLI" +gen api/3d/submit --model hy-3d-express --prompt 狗 --face-count 5000
 run_case 3d-pano-03 local "fail:只收公网 URL"   "panorama 本地图拦截（只收 URL）" \
-  "$THCLI" +gen wand/hunyuan-image/world2-panorama --model hy-world2-panorama --prompt 场景 --images $ROOM
+  "$THCLI" +gen wand/hunyuan-image/world2-panorama --model hy-world2-panorama --prompt 场景 --image-url $ROOM
 run_case 3d-scene-03 local "fail:只收公网 URL"  "scene 本地图拦截（只收 URL）" \
   "$THCLI" +gen wand/hunyuan-video/world2-scene --model hy-world2-scene --image-url $ROOM
 run_case 3d-scene-04 local "fail:之一"                      "scene 都缺" \
@@ -508,7 +512,7 @@ run_case real-vid-11  real ok "wand-video 首帧 URL" \
 run_case real-3d-01   real ok "hy-3d 本地商品图生 3D" \
   "$THCLI" +gen api/3d/submit --model hy-3d-3.1 --image-base64 "$SNEAKER" --no-wait
 run_case real-pano-01 real ok "world2 全景（房间图）" \
-  "$THCLI" +gen wand/hunyuan-image/world2-panorama --model hy-world2-panorama --prompt 温馨的客厅 --images "$ROOM_URL" --output "$R_OUT/real-pano-01"
+  "$THCLI" +gen wand/hunyuan-image/world2-panorama --model hy-world2-panorama --prompt 温馨的客厅 --image-url "$ROOM_URL" --output "$R_OUT/real-pano-01"
 run_case real-scene-01 real ok "world2 3D 场景（庭院图）" \
   "$THCLI" +gen wand/hunyuan-video/world2-scene --model hy-world2-scene --image-url "$COURT_URL" --no-wait
 # 语音

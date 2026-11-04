@@ -6,10 +6,10 @@
 | 类别 | 接口数 | 用例数 |
 |---|---|---|
 | [图像](#图像) | 6 | 62 |
-| [视频](#视频) | 16 | 154 |
+| [视频](#视频) | 16 | 155 |
 | [3D](#3d) | 3 | 25 |
 | [语音](#语音) | 8 | 57 |
-| **合计** | **33** | **298** |
+| **合计** | **33** | **299** |
 
 ## 图像
 
@@ -41,7 +41,7 @@
 | img-hunyuan-image-v35-generation-01 | 最小调用 | `thcli +gen wand/hunyuan-image/v35-generation --messages '[{"role":"user","content":[{"type":"text","text":"猫"}]}]'` | 必填字段 | 请求体含全部必填字段 |
 | img-hunyuan-image-v35-generation-02 | --size | `thcli +gen wand/hunyuan-image/v35-generation --messages '[{"role":"user","content":[{"type":"text","text":"猫"}]}]' --size 1024x1024` | size | 请求体含 size |
 | img-hunyuan-image-v35-generation-03 | --seed | `thcli +gen wand/hunyuan-image/v35-generation --messages '[{"role":"user","content":[{"type":"text","text":"猫"}]}]' --seed 42` | seed | 请求体含 seed |
-| img-hunyuan-image-v35-generation-04 | --generate-max-pixels | `thcli +gen wand/hunyuan-image/v35-generation --messages '[{"role":"user","content":[{"type":"text","text":"猫"}]}]' --generate-max-pixels 1048576` | generate_max_pixels | 请求体含 generate_max_pixels |
+| img-hunyuan-image-v35-generation-04 | --generate-max-pixels | `thcli +gen wand/hunyuan-image/v35-generation --messages '[{"role":"user","content":[{"type":"text","text":"猫"}]}]' --generate-max-pixels 1` | generate_max_pixels | 请求体含 generate_max_pixels |
 | img-hunyuan-image-v35-generation-05 | --resize-max-pixels | `thcli +gen wand/hunyuan-image/v35-generation --messages '[{"role":"user","content":[{"type":"text","text":"猫"}]}]' --resize-max-pixels 1` | resize_max_pixels | 请求体含 resize_max_pixels |
 | img-hunyuan-image-v35-generation-06 | --session | `thcli +gen wand/hunyuan-image/v35-generation --messages '[{"role":"user","content":[{"type":"text","text":"猫"}]}]' --session sess-001` | session | 请求体含 session |
 | img-hunyuan-image-v35-generation-07 | --footnote | `thcli +gen wand/hunyuan-image/v35-generation --messages '[{"role":"user","content":[{"type":"text","text":"猫"}]}]' --footnote 水印` | footnote | 请求体含 footnote |
@@ -119,21 +119,21 @@
 | 接口 | 模型 | 字段（* 必填） | 用例数 |
 |---|---|---|---|
 | [wand/hunyuan-video/generation](#wandhunyuan-videogeneration) | hy-video-v1.5 | --prompt --negative-prompt --image --image-url --n --duration --aspect-ratio --resolution --revise --moderation --seed --footnote | 14 |
-| [wand/kling/text-to-video](#wandklingtext-to-video) | kling-video-v3 / kling-video-v3-turbo / kling-video-v2.6 / kling-video-v2.5-turbo | *--prompt --settings --options | 4 |
-| [wand/kling/image-to-video](#wandklingimage-to-video) | kling-video-v3 / kling-video-v3-turbo / kling-video-v2.6 / kling-video-v2.5-turbo | *--contents --settings --options | 4 |
-| [wand/kling/omni-video](#wandklingomni-video) | kling-video-v3-omni / kling-video-o1 | *--contents --settings --options | 4 |
+| [wand/kling/text-to-video](#wandklingtext-to-video) | kling-video-v4 / kling-video-v3 / kling-video-v3-turbo / kling-video-v2.6 / kling-video-v2.5-turbo | *--prompt --settings --options | 4 |
+| [wand/kling/image-to-video](#wandklingimage-to-video) | kling-video-v4 / kling-video-v3 / kling-video-v3-turbo / kling-video-v2.6 / kling-video-v2.5-turbo | *--contents --settings --options | 4 |
+| [wand/kling/omni-video](#wandklingomni-video) | kling-video-v4 / kling-video-v3-omni / kling-video-o1 | *--contents --settings --options | 4 |
 | [wand/kling/motion-control](#wandklingmotion-control) | kling-video-motion-control-v3.0 / kling-video-motion-control-v2.6 | *--contents *--settings --options | 4 |
 | [wand/vidu/text-to-video](#wandvidutext-to-video) | vidu-video-q3-turbo / vidu-video-q3-pro / vidu-video-q2 | *--prompt --style --duration --aspect-ratio --resolution --movement-amplitude --bgm --audio --audio-type --seed --payload --watermark --wm-position --wm-url | 15 |
 | [wand/vidu/image-to-video](#wandviduimage-to-video) | vidu-video-q4-preview / vidu-video-q3-turbo / vidu-video-q3-pro / vidu-video-q2-pro / vidu-video-q2-turbo | *--images --prompt --audio --audio-type --voice-id --is-rec --bgm --duration --resolution --movement-amplitude --seed --payload --watermark --wm-position --wm-url | 16 |
 | [wand/vidu/start-end-to-video](#wandvidustart-end-to-video) | vidu-video-q3-turbo / vidu-video-q3-pro / vidu-video-q2-pro / vidu-video-q2-turbo | *--images --prompt --is-rec --duration --resolution --movement-amplitude --audio --bgm --seed --payload --watermark --wm-position --wm-url | 14 |
-| [wand/vidu/reference-to-video](#wandvidureference-to-video) | vidu-video-q4-preview / vidu-video-q3-turbo / vidu-video-q3 / vidu-video-q2 / vidu-video-q2-pro | --subjects --images --videos *--prompt --auto-subjects --audio --audio-type --duration --aspect-ratio --resolution --movement-amplitude --bgm --seed --payload --watermark --wm-position --wm-url | 20 |
+| [wand/vidu/reference-to-video](#wandvidureference-to-video) | vidu-video-q4-preview / vidu-video-q3-turbo / vidu-video-q3 / vidu-video-q2 / vidu-video-q2-pro | --subjects --images --videos *--prompt --auto-subjects --audio --audio-type --duration --aspect-ratio --resolution --movement-amplitude --bgm --seed --payload --watermark --wm-position --wm-url | 19 |
 | [wand/pixverse/text-to-video](#wandpixversetext-to-video) | pixverse-video-v6.0 / pixverse-video-c1 / pixverse-video-v5.6 | *--prompt *--duration *--quality --aspect-ratio --camera-movement --seed --generate-audio-switch --generate-multi-clip-switch | 10 |
-| [wand/pixverse/image-to-video](#wandpixverseimage-to-video) | pixverse-video-v6.0 / pixverse-video-c1 / pixverse-video-v5.6 | *--img-id --img-ids *--prompt *--duration *--quality --camera-movement --seed --generate-audio-switch --generate-multi-clip-switch | 11 |
+| [wand/pixverse/image-to-video](#wandpixverseimage-to-video) | pixverse-video-v6.0 / pixverse-video-c1 / pixverse-video-v5.6 | *--img-id --img-ids *--prompt *--duration *--quality --camera-movement --seed --generate-audio-switch --generate-multi-clip-switch | 12 |
 | [wand/pixverse/start-end-to-video](#wandpixversestart-end-to-video) | pixverse-video-v6.0 / pixverse-video-c1 / pixverse-video-v5.6 | *--prompt *--first-frame-img *--last-frame-img *--duration *--quality --seed --generate-audio-switch | 8 |
 | [wand/pixverse/reference-to-video](#wandpixversereference-to-video) | pixverse-video-v6.0 / pixverse-video-c1 / pixverse-video-v5.6 | *--image-references *--prompt *--duration *--quality --aspect-ratio --generate-audio-switch --seed | 8 |
-| [wand/minimax-video/generation](#wandminimax-videogeneration) | minimax-video-v2.3 / minimax-video-v2.3-fast | --prompt --prompt-optimizer --fast-pretreatment --duration --resolution --aigc-watermark --first-frame-image | 8 |
+| [wand/minimax-video/generation](#wandminimax-videogeneration) | minimax-video-v2.3 / minimax-video-v2.3-fast | --prompt --prompt-optimizer --fast-pretreatment --duration --resolution --aigc-watermark --first-frame-image --last-frame-image | 10 |
 | [wand/minimax-video-v2/generation](#wandminimax-video-v2generation) | minimax-video-h3 / minimax-video-h3-max | *--content *--resolution *--duration --ratio --aigc-watermark --extra | 7 |
-| [wand/vega-videos/tasks](#wandvega-videostasks) | wand-vega-video-1.0-lite | *--content --resolution --ratio --duration --options | 7 |
+| [wand/vega-videos/tasks](#wandvega-videostasks) | wand-vega-video-1.0-lite | *--content --resolution --ratio --duration --options | 9 |
 
 ### wand/hunyuan-video/generation
 
@@ -158,28 +158,28 @@
 
 | ID | 场景 | 命令 | 覆盖 | 预期 |
 |---|---|---|---|---|
-| vid-kling-text-to-video-01 | 最小调用 | `thcli +gen wand/kling/text-to-video --model kling-video-v3 --prompt 猫` | 必填字段 | 请求体含全部必填字段 |
-| vid-kling-text-to-video-02 | --settings | `thcli +gen wand/kling/text-to-video --model kling-video-v3 --prompt 猫 --settings '{"resolution":"x"}'` | settings | 请求体含 settings |
-| vid-kling-text-to-video-03 | --options | `thcli +gen wand/kling/text-to-video --model kling-video-v3 --prompt 猫 --options '{"external_task_id":"x"}'` | options | 请求体含 options |
-| vid-kling-text-to-video-04 | 缺 --prompt | `thcli +gen wand/kling/text-to-video --model kling-video-v3` | 必填校验 | 本地报「--prompt 必填」 |
+| vid-kling-text-to-video-01 | 最小调用 | `thcli +gen wand/kling/text-to-video --model kling-video-v4 --prompt 猫` | 必填字段 | 请求体含全部必填字段 |
+| vid-kling-text-to-video-02 | --settings | `thcli +gen wand/kling/text-to-video --model kling-video-v4 --prompt 猫 --settings '{"resolution":"720p"}'` | settings | 请求体含 settings |
+| vid-kling-text-to-video-03 | --options | `thcli +gen wand/kling/text-to-video --model kling-video-v4 --prompt 猫 --options '{"external_task_id":"x"}'` | options | 请求体含 options |
+| vid-kling-text-to-video-04 | 缺 --prompt | `thcli +gen wand/kling/text-to-video --model kling-video-v4` | 必填校验 | 本地报「--prompt 必填」 |
 
 ### wand/kling/image-to-video
 
 | ID | 场景 | 命令 | 覆盖 | 预期 |
 |---|---|---|---|---|
-| vid-kling-image-to-video-01 | 最小调用 | `thcli +gen wand/kling/image-to-video --model kling-video-v3 --contents '[{"type":"prompt","text":"猫转头"},{"type":"first_frame","url":"../assets/images/cat-window.jpg"}]'` | 必填字段 | 请求体含全部必填字段 |
-| vid-kling-image-to-video-02 | --settings | `thcli +gen wand/kling/image-to-video --model kling-video-v3 --contents '[{"type":"prompt","text":"猫转头"},{"type":"first_frame","url":"../assets/images/cat-window.jpg"}]' --settings '{"resolution":"x"}'` | settings | 请求体含 settings |
-| vid-kling-image-to-video-03 | --options | `thcli +gen wand/kling/image-to-video --model kling-video-v3 --contents '[{"type":"prompt","text":"猫转头"},{"type":"first_frame","url":"../assets/images/cat-window.jpg"}]' --options '{"external_task_id":"x"}'` | options | 请求体含 options |
-| vid-kling-image-to-video-04 | 缺 --contents | `thcli +gen wand/kling/image-to-video --model kling-video-v3` | 必填校验 | 本地报「--contents 必填」 |
+| vid-kling-image-to-video-01 | 最小调用 | `thcli +gen wand/kling/image-to-video --model kling-video-v4 --contents '[{"type":"prompt","text":"猫转头"},{"type":"first_frame","url":"../assets/images/cat-window.jpg"}]'` | 必填字段 | 请求体含全部必填字段 |
+| vid-kling-image-to-video-02 | --settings | `thcli +gen wand/kling/image-to-video --model kling-video-v4 --contents '[{"type":"prompt","text":"猫转头"},{"type":"first_frame","url":"../assets/images/cat-window.jpg"}]' --settings '{"resolution":"720p"}'` | settings | 请求体含 settings |
+| vid-kling-image-to-video-03 | --options | `thcli +gen wand/kling/image-to-video --model kling-video-v4 --contents '[{"type":"prompt","text":"猫转头"},{"type":"first_frame","url":"../assets/images/cat-window.jpg"}]' --options '{"external_task_id":"x"}'` | options | 请求体含 options |
+| vid-kling-image-to-video-04 | 缺 --contents | `thcli +gen wand/kling/image-to-video --model kling-video-v4` | 必填校验 | 本地报「--contents 必填」 |
 
 ### wand/kling/omni-video
 
 | ID | 场景 | 命令 | 覆盖 | 预期 |
 |---|---|---|---|---|
-| vid-kling-omni-video-01 | 最小调用 | `thcli +gen wand/kling/omni-video --model kling-video-v3-omni --contents '[{"type":"prompt","text":"猫转头"},{"type":"first_frame","url":"../assets/images/cat-window.jpg"}]'` | 必填字段 | 请求体含全部必填字段 |
-| vid-kling-omni-video-02 | --settings | `thcli +gen wand/kling/omni-video --model kling-video-v3-omni --contents '[{"type":"prompt","text":"猫转头"},{"type":"first_frame","url":"../assets/images/cat-window.jpg"}]' --settings '{"resolution":"x"}'` | settings | 请求体含 settings |
-| vid-kling-omni-video-03 | --options | `thcli +gen wand/kling/omni-video --model kling-video-v3-omni --contents '[{"type":"prompt","text":"猫转头"},{"type":"first_frame","url":"../assets/images/cat-window.jpg"}]' --options '{"external_task_id":"x"}'` | options | 请求体含 options |
-| vid-kling-omni-video-04 | 缺 --contents | `thcli +gen wand/kling/omni-video --model kling-video-v3-omni` | 必填校验 | 本地报「--contents 必填」 |
+| vid-kling-omni-video-01 | 最小调用 | `thcli +gen wand/kling/omni-video --model kling-video-v4 --contents '[{"type":"prompt","text":"猫转头"},{"type":"first_frame","url":"../assets/images/cat-window.jpg"}]'` | 必填字段 | 请求体含全部必填字段 |
+| vid-kling-omni-video-02 | --settings | `thcli +gen wand/kling/omni-video --model kling-video-v4 --contents '[{"type":"prompt","text":"猫转头"},{"type":"first_frame","url":"../assets/images/cat-window.jpg"}]' --settings '{"resolution":"720p"}'` | settings | 请求体含 settings |
+| vid-kling-omni-video-03 | --options | `thcli +gen wand/kling/omni-video --model kling-video-v4 --contents '[{"type":"prompt","text":"猫转头"},{"type":"first_frame","url":"../assets/images/cat-window.jpg"}]' --options '{"external_task_id":"x"}'` | options | 请求体含 options |
+| vid-kling-omni-video-04 | 缺 --contents | `thcli +gen wand/kling/omni-video --model kling-video-v4` | 必填校验 | 本地报「--contents 必填」 |
 
 ### wand/kling/motion-control
 
@@ -273,7 +273,6 @@
 | vid-vidu-reference-to-video-17 | --wm-url | `thcli +gen wand/vidu/reference-to-video --model vidu-video-q4-preview --prompt 猫 --images ../assets/images/portrait.jpg --wm-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/images/sneaker.png` | wm_url | 请求体含 wm_url |
 | vid-vidu-reference-to-video-18 | 缺 --prompt | `thcli +gen wand/vidu/reference-to-video --model vidu-video-q4-preview --images ../assets/images/portrait.jpg` | 必填校验 | 本地报「--prompt 必填」 |
 | vid-vidu-reference-to-video-19 | vidu-video-q4-preview 传 --videos | `thcli +gen wand/vidu/reference-to-video --model vidu-video-q4-preview --prompt 猫 --videos '["https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/videos/dance-8s.mp4"]'` | 适用模型 | 本地报「仅 vidu-video-q2-pro 支持」 |
-| vid-vidu-reference-to-video-20 | --videos 本地文件 | `thcli +gen wand/vidu/reference-to-video --model vidu-video-q4-preview --prompt 猫 --videos <含本地路径的 JSON>` | 只收 URL | 本地报「只收公网 URL」 |
 
 ### wand/pixverse/text-to-video
 
@@ -305,6 +304,7 @@
 | vid-pixverse-image-to-video-09 | 缺 --duration | `thcli +gen wand/pixverse/image-to-video --model pixverse-video-v6.0 --img-id ../assets/images/cat-window.jpg --prompt 猫 --quality 360p` | 必填校验 | 本地报「--duration 必填」 |
 | vid-pixverse-image-to-video-10 | 缺 --quality | `thcli +gen wand/pixverse/image-to-video --model pixverse-video-v6.0 --img-id ../assets/images/cat-window.jpg --prompt 猫 --duration 5` | 必填校验 | 本地报「--quality 必填」 |
 | vid-pixverse-image-to-video-11 | pixverse-video-c1 传 --generate-multi-clip-switch | `thcli +gen wand/pixverse/image-to-video --model pixverse-video-c1 --img-id ../assets/images/cat-window.jpg --prompt 猫 --duration 5 --quality 360p --generate-multi-clip-switch true` | 适用模型 | 本地报「仅 pixverse-video-v6.0 支持」 |
+| vid-pixverse-image-to-video-12 | --img-ids 本地文件 | `thcli +gen wand/pixverse/image-to-video --model pixverse-video-v6.0 --img-id ../assets/images/cat-window.jpg --prompt 猫 --duration 5 --quality 360p --img-ids <含本地路径的 JSON>` | 只收 URL | 本地报「只收公网 URL」 |
 
 ### wand/pixverse/start-end-to-video
 
@@ -344,6 +344,8 @@
 | vid-minimax-video-generation-06 | --resolution | `thcli +gen wand/minimax-video/generation --model minimax-video-v2.3 --prompt 猫 --resolution 768P` | resolution | 请求体含 resolution |
 | vid-minimax-video-generation-07 | --aigc-watermark | `thcli +gen wand/minimax-video/generation --model minimax-video-v2.3 --prompt 猫 --aigc-watermark true` | aigc_watermark | 请求体含 aigc_watermark |
 | vid-minimax-video-generation-08 | --first-frame-image | `thcli +gen wand/minimax-video/generation --model minimax-video-v2.3 --prompt 猫 --first-frame-image ../assets/images/cat-window.jpg` | first_frame_image | 请求体含 first_frame_image |
+| vid-minimax-video-generation-09 | --last-frame-image | `thcli +gen wand/minimax-video/generation --model minimax-video-v2.3 --prompt 猫 --last-frame-image ../assets/images/cat-window.jpg` | last_frame_image | 请求体含 last_frame_image |
+| vid-minimax-video-generation-10 | minimax-video-v2.3-fast 传 --last-frame-image | `thcli +gen wand/minimax-video/generation --model minimax-video-v2.3-fast --first-frame-image ../assets/images/cat-window.jpg --prompt 猫 --last-frame-image ../assets/images/cat-window.jpg` | 适用模型 | 本地报「仅 minimax-video-v2.3 支持」 |
 
 ### wand/minimax-video-v2/generation
 
@@ -367,14 +369,16 @@
 | vid-vega-videos-tasks-04 | --duration | `thcli +gen wand/vega-videos/tasks --content '[{"type":"text","text":"猫"}]' --duration 5` | duration | 请求体含 duration |
 | vid-vega-videos-tasks-05 | --options | `thcli +gen wand/vega-videos/tasks --content '[{"type":"text","text":"猫"}]' --options '{"return_last_frame":true}'` | options | 请求体含 options |
 | vid-vega-videos-tasks-06 | 缺 --content | `thcli +gen wand/vega-videos/tasks` | 必填校验 | 本地报「--content 必填」 |
-| vid-vega-videos-tasks-07 | --content 本地文件 | `thcli +gen wand/vega-videos/tasks --content <含本地路径的 JSON>` | 只收 URL | 本地报「只收公网 URL」 |
+| vid-vega-videos-tasks-07 | --content video_url 本地文件 | `thcli +gen wand/vega-videos/tasks --content '[{"type":"video_url","video_url":{"url":"<本地路径>"}}]'` | 只收 URL | 本地报「只收公网 URL」（上游实测拒绝内联 base64） |
+| vid-vega-videos-tasks-08 | --content 本地图片 | `thcli +gen wand/vega-videos/tasks --content '[{"type":"text","text":"猫"},{"type":"image_url","image_url":{"url":"<本地图片>"},"role":"first_frame"}]'` | content | image_url.url 编码为 data:image/…;base64,…（实测上游接受） |
+| vid-vega-videos-tasks-09 | --content 本地音频 | `thcli +gen wand/vega-videos/tasks --content '[{"type":"text","text":"猫"},{"type":"audio_url","audio_url":{"url":"<本地 mp3/wav，2~15 秒>"},"role":"reference_audio"}]'` | content | audio_url.url 编码为 data:audio/…;base64,…（实测上游接受，时长须 2000~15000 ms） |
 
 ## 3D
 
 | 接口 | 模型 | 字段（* 必填） | 用例数 |
 |---|---|---|---|
 | [api/3d/submit](#api3dsubmit) | hy-3d-3.0 / hy-3d-3.1 / hy-3d-express | --prompt --image-base64 --image-url --multi-view-images --enable-pbr --face-count --generate-type --polygon-type --result-format --enable-geometry | 17 |
-| [wand/hunyuan-image/world2-panorama](#wandhunyuan-imageworld2-panorama) | hy-world2-panorama | *--prompt --images | 4 |
+| [wand/hunyuan-image/world2-panorama](#wandhunyuan-imageworld2-panorama) | hy-world2-panorama | *--prompt --image_url | 4 |
 | [wand/hunyuan-video/world2-scene](#wandhunyuan-videoworld2-scene) | hy-world2-scene | --prompt --image-url | 4 |
 
 ### api/3d/submit
@@ -404,9 +408,9 @@
 | ID | 场景 | 命令 | 覆盖 | 预期 |
 |---|---|---|---|---|
 | 3d-hunyuan-image-world2-panorama-01 | 最小调用 | `thcli +gen wand/hunyuan-image/world2-panorama --prompt 猫` | 必填字段 | 请求体含全部必填字段 |
-| 3d-hunyuan-image-world2-panorama-02 | --images | `thcli +gen wand/hunyuan-image/world2-panorama --prompt 猫 --images '["https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/images/cat-window.jpg"]'` | images | 请求体含 images |
+| 3d-hunyuan-image-world2-panorama-02 | --image-url | `thcli +gen wand/hunyuan-image/world2-panorama --prompt 猫 --image-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/images/cat-window.jpg` | image_url | 请求体含 image_url |
 | 3d-hunyuan-image-world2-panorama-03 | 缺 --prompt | `thcli +gen wand/hunyuan-image/world2-panorama` | 必填校验 | 本地报「--prompt 必填」 |
-| 3d-hunyuan-image-world2-panorama-04 | --images 本地文件 | `thcli +gen wand/hunyuan-image/world2-panorama --prompt 猫 --images <含本地路径的 JSON>` | 只收 URL | 本地报「只收公网 URL」 |
+| 3d-hunyuan-image-world2-panorama-04 | --image-url 本地文件 | `thcli +gen wand/hunyuan-image/world2-panorama --prompt 猫 --image-url <本地路径>` | 只收 URL | 本地报「只收公网 URL」 |
 
 ### wand/hunyuan-video/world2-scene
 
@@ -424,11 +428,11 @@
 | [wand/asrproxy/sync_transcribe](#wandasrproxysynctranscribe) | hy-asr-3.0-preview / wand-asr-v1 | --input-url --data --source --voice-encode-format | 6 |
 | [wand/asrproxy/async_create](#wandasrproxyasynccreate) | hy-asr-3.0-preview / wand-asr-v1 | *--input-url --source --subtitle-format | 5 |
 | [wand/minimax-tts/sync_tts](#wandminimax-ttssynctts) | minimax-speech-2.8-hd / minimax-speech-2.8-turbo / minimax-speech-2.6-hd / minimax-speech-2.6-turbo / minimax-speech-02-hd / minimax-speech-02-turbo | *--text *--voice-setting --audio-setting --pronunciation-dict --timbre-weights --language-boost --voice-modify --subtitle-enable --subtitle-type --output-format --aigc-watermark | 12 |
-| [wand/minimax-tts/sync_clone](#wandminimax-ttssyncclone) | minimax-voice-clone | --audio-url --audio-data --tts-model --voice-id --text --text-validation --accuracy --output-format | 10 |
+| [wand/minimax-tts/sync_clone](#wandminimax-ttssyncclone) | minimax-voice-clone | --audio-url --audio-data --file-id --tts-model --voice-id --text --text-validation --accuracy --output-format | 11 |
 | [wand/minimax-tts/sync_design](#wandminimax-ttssyncdesign) | minimax-voice-design | *--prompt *--preview-text --voice-id --output-format --aigc-watermark | 6 |
 | [wand/dubbing/async_generation](#wanddubbingasyncgeneration) | wand-dubbing-clone-v1 / wand-dubbing-clone-v2 | *--input-url --src-language --dst-language | 4 |
 | [wand/minimax-music/generation](#wandminimax-musicgeneration) | minimax-music-v3.0 / minimax-music-v2.6 | --prompt --lyrics --lyrics-optimizer --is-instrumental --output-format --audio-setting --aigc-watermark | 8 |
-| [wand/mureka-music/generation](#wandmureka-musicgeneration) | mureka-music-v9 | *--lyrics --prompt --gender --styles --n | 6 |
+| [wand/mureka-music/generation](#wandmureka-musicgeneration) | mureka-music-v9 | *--lyrics --prompt --gender --n | 5 |
 
 ### wand/asrproxy/sync_transcribe
 
@@ -475,13 +479,14 @@
 | aud-minimax-tts-syncclone-01 | 最小调用 | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/ref6s.mp3` | 必填字段 | 请求体含全部必填字段 |
 | aud-minimax-tts-syncclone-02 | --audio-url | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/speech-zh-10s.wav` | audio_url | 请求体含 audio_url |
 | aud-minimax-tts-syncclone-03 | --audio-data | `thcli +gen wand/minimax-tts/sync_clone --audio-data ../assets/audio/speech-zh-10s.wav` | audio_data | 请求体含 audio_data |
-| aud-minimax-tts-syncclone-04 | --tts-model | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/ref6s.mp3 --tts-model minimax-speech-2.8-turbo` | tts_model | 请求体含 tts_model |
-| aud-minimax-tts-syncclone-05 | --voice-id | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/ref6s.mp3 --voice-id custom_001` | voice_id | 请求体含 voice_id |
-| aud-minimax-tts-syncclone-06 | --text | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/ref6s.mp3 --text 猫` | text | 请求体含 text |
-| aud-minimax-tts-syncclone-07 | --text-validation | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/ref6s.mp3 --text-validation x` | text_validation | 请求体含 text_validation |
-| aud-minimax-tts-syncclone-08 | --accuracy | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/ref6s.mp3 --accuracy 0.8` | accuracy | 请求体含 accuracy |
-| aud-minimax-tts-syncclone-09 | --output-format | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/ref6s.mp3 --output-format hex` | output_format | 请求体含 output_format |
-| aud-minimax-tts-syncclone-10 | --audio-url 本地文件 | `thcli +gen wand/minimax-tts/sync_clone --audio-url ../assets/images/cat-window.jpg` | 只收 URL | 本地报「只收公网 URL」 |
+| aud-minimax-tts-syncclone-04 | --file-id | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/ref6s.mp3 --file-id 1` | file_id | 请求体含 file_id |
+| aud-minimax-tts-syncclone-05 | --tts-model | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/ref6s.mp3 --tts-model minimax-speech-2.8-turbo` | tts_model | 请求体含 tts_model |
+| aud-minimax-tts-syncclone-06 | --voice-id | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/ref6s.mp3 --voice-id custom_001` | voice_id | 请求体含 voice_id |
+| aud-minimax-tts-syncclone-07 | --text | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/ref6s.mp3 --text 猫` | text | 请求体含 text |
+| aud-minimax-tts-syncclone-08 | --text-validation | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/ref6s.mp3 --text-validation x` | text_validation | 请求体含 text_validation |
+| aud-minimax-tts-syncclone-09 | --accuracy | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/ref6s.mp3 --accuracy 0.8` | accuracy | 请求体含 accuracy |
+| aud-minimax-tts-syncclone-10 | --output-format | `thcli +gen wand/minimax-tts/sync_clone --audio-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/ref6s.mp3 --output-format hex` | output_format | 请求体含 output_format |
+| aud-minimax-tts-syncclone-11 | --audio-url 本地文件 | `thcli +gen wand/minimax-tts/sync_clone --audio-url ../assets/images/cat-window.jpg` | 只收 URL | 本地报「只收公网 URL」 |
 
 ### wand/minimax-tts/sync_design
 
@@ -523,6 +528,5 @@
 | aud-mureka-music-generation-01 | 最小调用 | `thcli +gen wand/mureka-music/generation --lyrics '[Verse] 歌词' --lyrics '[Verse] 歌词'` | 必填字段 | 请求体含全部必填字段 |
 | aud-mureka-music-generation-02 | --prompt | `thcli +gen wand/mureka-music/generation --lyrics '[Verse] 歌词' --lyrics '[Verse] 歌词' --prompt 猫` | prompt | 请求体含 prompt |
 | aud-mureka-music-generation-03 | --gender | `thcli +gen wand/mureka-music/generation --lyrics '[Verse] 歌词' --lyrics '[Verse] 歌词' --gender female` | gender | 请求体含 gender |
-| aud-mureka-music-generation-04 | --styles | `thcli +gen wand/mureka-music/generation --lyrics '[Verse] 歌词' --lyrics '[Verse] 歌词' --styles '["pop"]'` | styles | 请求体含 styles |
-| aud-mureka-music-generation-05 | --n | `thcli +gen wand/mureka-music/generation --lyrics '[Verse] 歌词' --lyrics '[Verse] 歌词' --n 2` | n | 请求体含 n |
-| aud-mureka-music-generation-06 | 缺 --lyrics | `thcli +gen wand/mureka-music/generation` | 必填校验 | 本地报「--lyrics 必填」 |
+| aud-mureka-music-generation-04 | --n | `thcli +gen wand/mureka-music/generation --lyrics '[Verse] 歌词' --lyrics '[Verse] 歌词' --n 2` | n | 请求体含 n |
+| aud-mureka-music-generation-05 | 缺 --lyrics | `thcli +gen wand/mureka-music/generation` | 必填校验 | 本地报「--lyrics 必填」 |

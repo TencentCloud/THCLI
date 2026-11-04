@@ -33,6 +33,10 @@ export const IMAGE_MIME: Record<string, string> = {
   ".gif": "image/gif",
   ".webp": "image/webp",
   ".bmp": "image/bmp",
+  ".tiff": "image/tiff",
+  ".tif": "image/tiff",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
 };
 
 /** 视频扩展名 → MIME */

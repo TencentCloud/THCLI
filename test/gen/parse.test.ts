@@ -68,6 +68,13 @@ describe("响应归一化（用文档示例响应）", () => {
     assert.deepEqual([r.state, r.urls], ["succeeded", ["https://s/0.png", "https://s/1.png"]]);
   });
 
+  it("Kling 生图水印版本：watermark_info.enabled=true 时 watermark_url 进 extraUrls", () => {
+    const r = familyOf("kling-image-v3")!.parse({
+      data: { task_status: "succeed", task_result: { images: [{ url: "https://x/1.png", watermark_url: "https://x/1-wm.png" }] } },
+    });
+    assert.deepEqual([r.state, r.urls, r.extraUrls], ["succeeded", ["https://x/1.png"], ["https://x/1-wm.png"]]);
+  });
+
   it("hy-3d result_format 枚举为大写（服务端拒收小写 stl）", () => {
     assert.deepEqual(param("api/3d/submit", "result_format").choices, ["STL", "USDZ", "FBX", "OBJ", "GLB", "MP4"]);
   });

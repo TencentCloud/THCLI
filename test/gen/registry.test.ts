@@ -110,20 +110,20 @@ describe("注册表完整性", () => {
       ["wand/pixverse/image-to-video", ["img_id", "img_ids", "prompt", "duration", "quality", "camera_movement", "seed", "generate_audio_switch", "generate_multi_clip_switch"]],
       ["wand/pixverse/start-end-to-video", ["prompt", "first_frame_img", "last_frame_img", "duration", "quality", "seed", "generate_audio_switch"]],
       ["wand/pixverse/reference-to-video", ["image_references", "prompt", "duration", "quality", "aspect_ratio", "generate_audio_switch", "seed"]],
-      ["wand/minimax-video/generation", ["prompt", "prompt_optimizer", "fast_pretreatment", "duration", "resolution", "aigc_watermark", "first_frame_image"]],
+      ["wand/minimax-video/generation", ["prompt", "prompt_optimizer", "fast_pretreatment", "duration", "resolution", "aigc_watermark", "first_frame_image", "last_frame_image"]],
       ["wand/minimax-video-v2/generation", ["content", "resolution", "duration", "ratio", "aigc_watermark", "extra"]],
       ["wand/vega-videos/tasks", ["content", "resolution", "ratio", "duration", "options"]],
       ["api/3d/submit", ["prompt", "image_base64", "image_url", "multi_view_images", "enable_pbr", "face_count", "generate_type", "polygon_type", "result_format", "enable_geometry"]],
-      ["wand/hunyuan-image/world2-panorama", ["prompt", "images"]],
+      ["wand/hunyuan-image/world2-panorama", ["prompt", "image_url"]],
       ["wand/hunyuan-video/world2-scene", ["prompt", "image_url"]],
       ["wand/asrproxy/sync_transcribe", ["input_url", "data", "source", "voice_encode_format"]],
       ["wand/asrproxy/async_create", ["input_url", "source", "subtitle_format"]],
       ["wand/minimax-tts/sync_tts", ["text", "voice_setting", "audio_setting", "pronunciation_dict", "timbre_weights", "language_boost", "voice_modify", "subtitle_enable", "subtitle_type", "output_format", "aigc_watermark"]],
-      ["wand/minimax-tts/sync_clone", ["audio_url", "audio_data", "tts_model", "voice_id", "text", "text_validation", "accuracy", "output_format"]],
+      ["wand/minimax-tts/sync_clone", ["audio_url", "audio_data", "file_id", "tts_model", "voice_id", "text", "text_validation", "accuracy", "output_format"]],
       ["wand/minimax-tts/sync_design", ["prompt", "preview_text", "voice_id", "output_format", "aigc_watermark"]],
       ["wand/dubbing/async_generation", ["input_url", "src_language", "dst_language"]],
       ["wand/minimax-music/generation", ["prompt", "lyrics", "lyrics_optimizer", "is_instrumental", "output_format", "audio_setting", "aigc_watermark"]],
-      ["wand/mureka-music/generation", ["lyrics", "prompt", "gender", "styles", "n"]],
+      ["wand/mureka-music/generation", ["lyrics", "prompt", "gender", "n"]],
     ];
     assert.equal(cases.length, APIS.length, "每个接口都要有字段清单");
     for (const [id, want] of cases) {
@@ -133,8 +133,10 @@ describe("注册表完整性", () => {
 
   it("模型白名单（官方接口的 model 取值列表）", () => {
     assert.deepEqual(ep("wand/vidu/text-to-video").models, ["vidu-video-q3-turbo", "vidu-video-q3-pro", "vidu-video-q2"]);
-    assert.deepEqual(ep("wand/vidu/reference-to-video").models, ["vidu-video-q4-preview", "vidu-video-q3-turbo", "vidu-video-q3", "vidu-video-q2", "vidu-video-q2-pro"]);
-    assert.ok(ep("wand/vidu/image-to-video").models.includes("vidu-video-q4-preview"));
+    assert.deepEqual(ep("wand/vidu/reference-to-video").models, ["vidu-video-q4-preview", "vidu-video-q3-turbo", "vidu-video-q3", "vidu-video-q2", "vidu-video-q2-pro", "vidu-video-q2-turbo"]);
+    // TokenPlan 表格最终版（9-23）：q3 / q2 补图生与首尾帧，q2-turbo 补多图参考
+    assert.deepEqual(ep("wand/vidu/image-to-video").models, ["vidu-video-q4-preview", "vidu-video-q3-turbo", "vidu-video-q3-pro", "vidu-video-q3", "vidu-video-q2", "vidu-video-q2-pro", "vidu-video-q2-turbo"]);
+    assert.deepEqual(ep("wand/vidu/start-end-to-video").models, ["vidu-video-q3-turbo", "vidu-video-q3-pro", "vidu-video-q3", "vidu-video-q2", "vidu-video-q2-pro", "vidu-video-q2-turbo"]);
     assert.ok(!ep("wand/vidu/text-to-video").models.includes("vidu-video-q4-preview"), "q4-preview 只支持图生 / 参考生");
     assert.ok(!apiSupportsModel(ep("wand/vidu/text-to-video"), "vidu-video-q3"));
     assert.deepEqual(ep("wand/si-image/generation").models, ["seedream-image-v5.0-pro", "seedream-image-v5.0-lite", "seedream-image-v5.0-flash"]);
@@ -152,7 +154,7 @@ describe("注册表完整性", () => {
       ["hy-image-v3", 8192],
       ["seedream-image-v5.0-pro", 600],
       ["kling-image-v3", 2500],
-      ["kling-video-v3", 3072],
+      ["kling-video-v3", 26000],
       ["vidu-video-q3", 5000],
       ["pixverse-video-v6.0", 5000],
       ["minimax-video-h3", 2000],
@@ -197,6 +199,14 @@ describe("请求体校验（适用模型 / 必填 / 互斥）", () => {
     bad("api/3d/submit", { model: "hy-3d-express", prompt: "p", face_count: 5000 }, /--face-count is only supported/);
     bad("api/3d/submit", { model: "hy-3d-3.1", prompt: "p", enable_geometry: true }, /--enable-geometry is only supported by hy-3d-express/);
     bad("wand/pixverse/text-to-video", { model: "pixverse-video-c1", prompt: "p", duration: 5, quality: "720p", generate_multi_clip_switch: true }, /only supported by pixverse-video-v6.0/);
+    // v3-turbo 图生视频允许尾帧（TokenPlan 最终版 9-23：type=first_frame/last_frame，1~2 张）
+    ok("wand/kling/image-to-video", { model: "kling-video-v3-turbo", contents: [{ type: "prompt", text: "p" }, { type: "first_frame", url: "u" }, { type: "last_frame", url: "v" }], settings: { resolution: "1080p", duration: 5 } });
+    // h3-max 支持多模态参考（与 h3 同权）：调用指南口径，2026-11-04 实测 reference_image 出片成功；TokenPlan 表格 9-23「不支持」为错误声明
+    ok("wand/minimax-video-v2/generation", { model: "minimax-video-h3-max", content: [{ type: "text", text: "p" }, { type: "image_url", image_url: { url: "u" }, role: "reference_image" }], resolution: "768P", duration: 6, ratio: "16:9" });
+    ok("wand/minimax-video-v2/generation", { model: "minimax-video-h3-max", content: [{ type: "text", text: "p" }, { type: "image_url", image_url: { url: "u" }, role: "first_frame" }], resolution: "768P", duration: 6, ratio: "16:9" });
+    // subjects[].videos 仅 q2-pro：其他模型本地先拦
+    bad("wand/vidu/reference-to-video", { model: "vidu-video-q3", subjects: [{ name: "s", videos: ["u"] }], prompt: "p" }, /q2-pro/);
+    ok("wand/vidu/reference-to-video", { model: "vidu-video-q2-pro", subjects: [{ name: "s", videos: ["u"] }], prompt: "p" });
   });
 
   it("模型级规则：kling-image 组图 / 负向提示词", () => {
@@ -241,6 +251,20 @@ describe("请求体校验（适用模型 / 必填 / 互斥）", () => {
     assert.throws(() => parseParamValue(param(H, "ratio"), "5:4"), /must be one of/);
   });
 
+  it("content 内 text 块长度：H3 拦 2000；WAND 文档矛盾（概览 2000 / 指南 8192）取宽值 8192，2000~8192 不误拦", () => {
+    const H = "wand/minimax-video-v2/generation";
+    const hb = { model: "minimax-video-h3", resolution: "768P", duration: 6, ratio: "16:9" };
+    const long = "a".repeat(2001);
+    bad(H, { ...hb, content: [{ type: "text", text: long }] }, /content\[\]\.text is 2001 characters/);
+    ok(H, { ...hb, content: [{ type: "text", text: "a".repeat(2000) }, { type: "image_url", image_url: { url: "https://x/a.jpg" }, role: "first_frame" }] });
+    const W = "wand/vega-videos/tasks";
+    const wb = { model: "wand-vega-video-1.0-lite" };
+    ok(W, { ...wb, content: [{ type: "text", text: "a".repeat(5000) }] });
+    bad(W, { ...wb, content: [{ type: "text", text: "a".repeat(8193) }] }, /content\[\]\.text is 8193 characters/);
+    // 素材块不带 text：不受长度校验影响
+    ok(W, { ...wb, content: [{ type: "image_url", image_url: { url: "https://x/a.jpg" } }] });
+  });
+
   it("音视频本地文件限制：音色复刻 mp3/m4a/wav ≤20MB；配音 mp4/mov/m4v ≤75MB", () => {
     const clone = single("wand/minimax-tts/sync_clone", "audio_data");
     assert.deepEqual([clone.formats, clone.maxBytes], [["mp3", "m4a", "wav"], 20_000_000]);
@@ -278,7 +302,7 @@ describe("请求体校验（适用模型 / 必填 / 互斥）", () => {
     const E = "wand/mureka-music/generation";
     const m = { model: "mureka-music-v9" };
     bad(E, { ...m, prompt: "lo-fi", n: 1 }, /--lyrics is required/);
-    bad(E, { ...m, prompt: "p", styles: ["pop", "rock"] }, /--lyrics is required/);
+    bad(E, { ...m, prompt: "p" }, /--lyrics is required/);
     ok(E, { ...m, lyrics: "[Verse] a", prompt: "pop", gender: "female", n: 1 });
     bad(E, { ...m, lyrics: "a".repeat(5001) }, /5000/);
     bad(E, { ...m, lyrics: "a", prompt: "p".repeat(1025) }, /1024/);
@@ -298,6 +322,100 @@ describe("请求体校验（适用模型 / 必填 / 互斥）", () => {
     const settings = { character_orientation: "image" };
     bad("wand/kling/motion-control", { model: "kling-video-motion-control-v3.0", contents: [{ type: "image", url: "a" }], settings }, /type="video"/);
     ok("wand/kling/motion-control", { model: "kling-video-motion-control-v3.0", contents: [{ type: "image", url: "a" }, { type: "video", url: "https://x/m.mp4" }], settings });
+  });
+
+  it("Kling 生视频（以调用指南为准）：v4 / 按模型 settings / 素材组合", () => {
+    const T2V = "wand/kling/text-to-video";
+    const I2V = "wand/kling/image-to-video";
+    const O = "wand/kling/omni-video";
+    const M = "wand/kling/motion-control";
+    const p = { type: "prompt", text: "p" };
+    const first = { type: "first_frame", url: "https://x/a.jpg" };
+    const last = { type: "last_frame", url: "https://x/b.jpg" };
+    const v = "https://x/in.mp4";
+
+    // 文生：v4 21:9 / 30s；21:9 仅 v4；4k 仅 V3；时长按模型；audio / multi_shot 按模型
+    ok(T2V, { model: "kling-video-v4", prompt: "p", settings: { aspect_ratio: "21:9", duration: 30 } });
+    bad(T2V, { model: "kling-video-v3", prompt: "p", settings: { aspect_ratio: "21:9" } }, /21:9 is kling-video-v4 only/);
+    bad(T2V, { model: "kling-video-v4", prompt: "p", settings: { resolution: "4k" } }, /does not support 4k/);
+    ok(T2V, { model: "kling-video-v3", prompt: "p", settings: { resolution: "4k", duration: 15, multi_shot: false, audio: "native" } });
+    bad(T2V, { model: "kling-video-v3", prompt: "p", settings: { duration: 16 } }, /3~15/);
+    bad(T2V, { model: "kling-video-v2.6", prompt: "p", settings: { duration: 7 } }, /5 \/ 10/);
+    bad(T2V, { model: "kling-video-v4", prompt: "p", settings: { audio: "native" } }, /settings\.audio is only supported by kling-video-v3 \/ kling-video-v2\.6/);
+    bad(T2V, { model: "kling-video-v3-turbo", prompt: "p", settings: { multi_shot: true } }, /settings\.multi_shot/);
+    bad(T2V, { model: "kling-video-v2.6", prompt: "p", settings: { audio: "native" } }, /1080p/);
+    ok(T2V, { model: "kling-video-v2.6", prompt: "p", settings: { audio: "native", resolution: "1080p" } });
+    // 提示词：v4 中英加权；V3 ≤3072；其余 ≤2500
+    ok(T2V, { model: "kling-video-v4", prompt: "a".repeat(26000) });
+    bad(T2V, { model: "kling-video-v4", prompt: "中".repeat(11001) }, /kling-video-v4 length limit/);
+    bad(T2V, { model: "kling-video-v4", prompt: "a".repeat(13000) + "中".repeat(5600) }, /kling-video-v4 length limit/);
+    ok(T2V, { model: "kling-video-v3", prompt: "a".repeat(3072) });
+    bad(T2V, { model: "kling-video-v3-turbo", prompt: "a".repeat(2501) }, /2500/);
+
+    // 图生：须 prompt + first_frame；素材类型按模型；音色需 audio 非 off；V2.6 / V2.5 首尾帧清晰度
+    bad(I2V, { model: "kling-video-v3", contents: [first] }, /at least one type=prompt and one type=first_frame/);
+    ok(I2V, { model: "kling-video-v4", contents: [p, first, last] });
+    // TokenPlan 最终版（9-23）：v3-turbo 允许尾帧；但 element 仍不在其白名单
+    ok(I2V, { model: "kling-video-v3-turbo", contents: [p, first, last], settings: { resolution: "1080p" } });
+    bad(I2V, { model: "kling-video-v3-turbo", contents: [p, first, { type: "element", element_id: "e" }] }, /does not support block type element/);
+    bad(I2V, { model: "kling-video-v4", contents: [p, first, { type: "element", element_id: "e" }] }, /does not support block type element/);
+    bad(I2V, { model: "kling-video-v3", contents: [p, first, { ...first }] }, /At most 1 first_frame/);
+    const voice = (id: string) => ({ type: "voice", voice_id: "vv", id });
+    bad(I2V, { model: "kling-video-v2.6", contents: [p, first, voice("1")], settings: { resolution: "1080p" } }, /cannot be off or omitted/);
+    ok(I2V, { model: "kling-video-v2.6", contents: [p, first, voice("1")], settings: { audio: "native", resolution: "1080p" } });
+    bad(I2V, { model: "kling-video-v3", contents: [p, first, voice("1"), voice("2"), voice("3")], settings: { audio: "native" } }, /At most 2 blocks of type=voice/);
+    bad(I2V, { model: "kling-video-v3", contents: [p, first, voice("1"), voice("1")], settings: { audio: "native" } }, /Duplicate block id 1/);
+    bad(I2V, { model: "kling-video-v3", contents: [p, first, { type: "voice", voice_id: "vv" }], settings: { audio: "native" } }, /missing the id field/);
+    bad(I2V, { model: "kling-video-v2.6", contents: [p, first, last], settings: { resolution: "1080p" } }, /720p with first\/last frames/);
+    bad(I2V, { model: "kling-video-v2.5-turbo", contents: [p, first, last] }, /1080p with first\/last frames/);
+    ok(I2V, { model: "kling-video-v2.5-turbo", contents: [p, first, last], settings: { resolution: "1080p" } });
+    bad(I2V, { model: "kling-video-v3", contents: [{ type: "prompt", text: "a".repeat(2501) }, first] }, /2500/);
+
+    // 全能 v4：21:9 / adaptive；不支持 base_video / audio；视频仅 URL；数量上限
+    ok(O, { model: "kling-video-v4", contents: [p, { type: "feature_video", url: v }], settings: { aspect_ratio: "adaptive", duration: 30 } });
+    bad(O, { model: "kling-video-v4", contents: [p, { type: "base_video", url: v }] }, /does not support base_video/);
+    bad(O, { model: "kling-video-v4", contents: [p, first], settings: { audio: "off" } }, /settings\.audio is only supported by/);
+    bad(O, { model: "kling-video-v4", contents: [p, { type: "feature_video", url: "AAAA" }] }, /public URLs/);
+    const refs = (n: number) => Array.from({ length: n }, (_, i) => ({ type: "refer_image", url: `https://x/${i}.jpg` }));
+    bad(O, { model: "kling-video-v4", contents: [p, ...refs(11)] }, /At most 10 blocks of type=image/);
+    // v4 图片单张 ≤30MB：本地文件编码为 data URL 后按 Base64 载荷估算（30MB 文件 → 恰 40_000_000 载荷，放行；40_000_002 → 30MB+1.5B，拦截）
+    ok(O, { model: "kling-video-v4", contents: [p, { type: "refer_image", url: "data:image/jpeg;base64,AAAA" }] });
+    bad(O, { model: "kling-video-v4", contents: [p, { type: "refer_image", url: "data:image/jpeg;base64," + "A".repeat(40_000_002) }] }, /30MB/);
+    const els = (n: number) => Array.from({ length: n }, (_, i) => ({ type: "element", element_id: `e${i}` }));
+    bad(O, { model: "kling-video-v4", contents: [p, ...refs(10), ...els(6)] }, /at most 15 materials/);
+    bad(O, { model: "kling-video-v3-omni", contents: [p, first], settings: { aspect_ratio: "adaptive" } }, /adaptive is kling-video-v4 only/);
+
+    // 全能 V3-Omni / O1：组合限制
+    const ar = { aspect_ratio: "16:9" };
+    // text 只能放 type=prompt 块（挂在素材块上上游 1201 报 prompt must have non-blank text）
+    bad(O, { model: "kling-video-v3-omni", contents: [{ type: "base_video", url: v, text: "白膜" }], settings: ar }, /type=prompt/);
+    bad(I2V, { model: "kling-video-v3", contents: [{ type: "first_frame", url: "https://x/a.jpg", text: "cat" }] }, /type=prompt/);
+    bad(O, { model: "kling-video-v3-omni", contents: [p, last], settings: ar }, /last_frame requires a first_frame/);
+    bad(O, { model: "kling-video-v3-omni", contents: [p, { type: "feature_video", url: v }, { type: "base_video", url: v }], settings: ar }, /At most 1 blocks/);
+    bad(O, { model: "kling-video-v3-omni", contents: [p, first, last, { type: "feature_video", url: v }] }, /last_frame is not supported with a feature_video/);
+    bad(O, { model: "kling-video-v3-omni", contents: [p, first, { type: "base_video", url: v }] }, /not supported with a base_video/);
+    bad(O, { model: "kling-video-v3-omni", contents: [p, { type: "base_video", url: v }], settings: { ...ar, audio: "native" } }, /cannot be native with a base_video/);
+    bad(O, { model: "kling-video-v3-omni", contents: [p, { type: "feature_video", url: v }], settings: { ...ar, audio: "original" } }, /must be off for kling-video-v3-omni/);
+    bad(O, { model: "kling-video-v3-omni", contents: [p, { type: "feature_video", url: v }, ...refs(5)], settings: ar }, /limited to 4/);
+    ok(O, { model: "kling-video-v3-omni", contents: [p, ...refs(7)], settings: ar });
+    bad(O, { model: "kling-video-v3-omni", contents: [p, ...refs(8)], settings: ar }, /limited to 7/);
+    bad(O, { model: "kling-video-o1", contents: [p, first], settings: { audio: "native" } }, /original \/ off only/);
+    bad(O, { model: "kling-video-o1", contents: [p, first], settings: { multi_shot: true } }, /settings\.multi_shot/);
+    bad(O, { model: "kling-video-o1", contents: [p, first, last, ...refs(1)] }, /together with first\/last frames/);
+    bad(O, { model: "kling-video-o1", contents: [p, first], settings: { duration: 12 } }, /3~10/);
+    ok(O, { model: "kling-video-v3-omni", contents: [{ type: "prompt", text: "a".repeat(3072) }, first] });
+    bad(O, { model: "kling-video-o1", contents: [{ type: "prompt", text: "a".repeat(2501) }, first] }, /2500/);
+
+    // 动作控制：视频仅 URL；element 仅 v3.0、≤1 个、须 id、朝向只能 video
+    const img = { type: "image", url: "https://x/a.jpg" };
+    const mv = { type: "video", url: v };
+    const el = { type: "element", element_id: "e", id: "e1" };
+    bad(M, { model: "kling-video-motion-control-v3.0", contents: [img, { type: "video", url: "AAAA" }], settings: { character_orientation: "video" } }, /public URLs/);
+    ok(M, { model: "kling-video-motion-control-v3.0", contents: [img, mv, el], settings: { character_orientation: "video" } });
+    bad(M, { model: "kling-video-motion-control-v3.0", contents: [img, mv, el], settings: { character_orientation: "image" } }, /must be video when an element/);
+    bad(M, { model: "kling-video-motion-control-v3.0", contents: [img, mv, el, { ...el, id: "e2" }], settings: { character_orientation: "video" } }, /At most 1 blocks of type=element/);
+    bad(M, { model: "kling-video-motion-control-v3.0", contents: [img, mv, { type: "element", element_id: "e" }], settings: { character_orientation: "video" } }, /missing the id field/);
+    bad(M, { model: "kling-video-motion-control-v2.6", contents: [img, mv, el], settings: { character_orientation: "video" } }, /does not support block type element/);
   });
 
   it("提示词超长按族上限拦截（prompt / text）", () => {
@@ -339,7 +457,8 @@ describe("参数解析（--<flag> 的值）", () => {
     assert.throws(() => parseParamValue(param("wand/minimax-tts/sync_tts", "aigc_watermark"), "yes"), /expects true or false/);
     const genPixels = param("wand/hunyuan-image/v35-generation", "generate_max_pixels");
     assert.equal(parseParamValue(genPixels, "4194304"), 4194304);
-    assert.throws(() => parseParamValue(genPixels, "999"), /must be one of/);
+    // 非档位值不再本地硬拒：文档说明由服务端按最近面积归档
+    assert.equal(parseParamValue(genPixels, "999"), 999);
     assert.equal(parseParamValue(param("wand/si-image/generation", "size"), "1024"), "1024");
     // series_amount：数字或 auto
     assert.equal(parseParamValue(param("wand/kling-image/generation", "series_amount"), "4"), 4);
@@ -374,18 +493,53 @@ describe("本地文件编码位置（mapMedia）", () => {
   it("可收本地文件的字段都声明了编码规则；只收 URL 的字段标 urlOnly", () => {
     assert.equal(single("wand/si-image/generation", "images").encoding, "dataUrl");
     assert.equal(single("wand/kling-image/generation", "image").encoding, "raw");
+    assert.equal(single("wand/hunyuan-video/generation", "image").encoding, "dataUrl");
+    assert.equal(single("wand/kling/image-to-video", "contents").encoding, "dataUrl");
     assert.deepEqual(single("wand/kling/image-to-video", "contents").keys, ["url"]);
-    assert.equal(single("wand/vega-videos/tasks", "content").encoding, "urlOnly");
+    // omni 的 contents[].url 同时承载图片与视频：type=auto（按扩展名分派），视频 mp4/mov ≤75MB
+    const omniUrl = single("wand/kling/omni-video", "contents");
+    assert.equal(omniUrl.type, "auto");
+    assert.equal(omniUrl.encoding, "dataUrl");
+    assert.deepEqual(omniUrl.formats, ["mp4", "mov"]);
+    assert.equal(omniUrl.maxBytes, 75_000_000);
+    // vega：content 三规则——image_url / audio_url 可本地（dataUrl，实测上游接受；audio 时长须 2~15s）；
+    // video_url 上游明确拒绝内联 base64（2026-11-03 实测 400），仅公网 URL
+    const vegaContent = param("wand/vega-videos/tasks", "content").media as MediaSpec[];
+    assert.ok(Array.isArray(vegaContent), "content.media 应为数组（三规则）");
+    assert.deepEqual(
+      vegaContent.map((m) => [m.encoding, m.keys, m.type]),
+      [["dataUrl", ["image_url.url"], "image"], ["urlOnly", ["video_url.url"], "image"], ["dataUrl", ["audio_url.url"], "media"]],
+    );
+    assert.equal(vegaContent[2]!.maxBytes, 15_000_000);
     assert.equal(single("wand/asrproxy/async_create", "input_url").encoding, "urlOnly");
     assert.equal(single("wand/asrproxy/sync_transcribe", "data").encoding, "raw");
+    // ASR 同步 data ≤75MB（TokenPlan 最终版 9-23；原实现无上限）
+    assert.equal(single("wand/asrproxy/sync_transcribe", "data").maxBytes, 75_000_000);
+    // panorama 参考图改名 image_url 单值仅 URL（TokenPlan 最终版 9-23；与 world2-scene 姊妹接口对齐）
+    assert.equal(single("wand/hunyuan-image/world2-panorama", "image_url").encoding, "urlOnly");
+    assert.ok(!ep("wand/hunyuan-image/world2-panorama").params.some((p) => p.path === "images"), "panorama 不再有 images 数组参数");
+    // WAND_IMAGE input：0~10 张（TokenPlan 最终版 9-23）
+    assert.match(param("wand/vega-images/generations", "input").desc.zh, /0~10 张/);
     assert.equal(single("wand/dubbing/async_generation", "input_url").encoding, "dataUrl");
     assert.equal(single("api/3d/submit", "image_base64").encoding, "raw");
-    // subjects 双规则：images 可本地（dataUrl），videos 仅公网 URL（urlOnly）
+    // PixVerse：img_id 单图可本地（dataUrl）；img_ids 多图模板仅 URL（TokenPlan 表格明确）
+    assert.equal(single("wand/pixverse/image-to-video", "img_id").encoding, "dataUrl");
+    assert.equal(single("wand/pixverse/image-to-video", "img_ids").encoding, "urlOnly");
+    // minimax v2 三规则：image_url 图片可本地（dataUrl），video_url ≤50MB / audio_url ≤15MB 也可本地
+    const content = param("wand/minimax-video-v2/generation", "content").media as MediaSpec[];
+    assert.ok(Array.isArray(content), "content.media 应为数组（三规则）");
+    assert.deepEqual(
+      content.map((m) => [m.encoding, m.keys?.[0], m.maxBytes]),
+      [["dataUrl", "image_url.url", undefined], ["dataUrl", "video_url.url", 50_000_000], ["dataUrl", "audio_url.url", 15_000_000]],
+    );
+    // v2.3-fast 不支持尾帧
+    assert.deepEqual(param("wand/minimax-video/generation", "last_frame_image").models, ["minimax-video-v2.3"]);
+    // subjects 双规则：images 可本地（dataUrl），videos 也可本地（dataUrl，mp4/avi/mov ≤20MB）
     const subjects = param("wand/vidu/reference-to-video", "subjects").media as MediaSpec[];
     assert.ok(Array.isArray(subjects), "subjects.media 应为数组（双规则）");
     assert.deepEqual(
       subjects.map((m) => [m.encoding, m.keys?.[0]]),
-      [["dataUrl", "images"], ["urlOnly", "videos"]],
+      [["dataUrl", "images"], ["dataUrl", "videos"]],
     );
   });
 });

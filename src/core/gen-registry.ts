@@ -64,12 +64,16 @@ export interface ParamField {
   max?: number;
   /** 嵌套结构的子字段（如 content[].image_url{url}） */
   fields?: ParamField[];
+  /** 适用模型（缺省 = 接口全部模型）；仅对 object 参数的直接子字段生效（如 Kling settings.multi_shot 仅 V3） */
+  models?: string[];
 }
 
 /** 字段值里的本地文件编码规则 */
 export interface MediaSpec {
-  /** image：按族的格式 / 大小约束编码图片（视频文件只收 URL）；media：音频 / 视频 */
-  type: "image" | "media";
+  /** image：按族的格式 / 大小约束编码图片（视频文件只收 URL）；media：音频 / 视频；
+   *  auto：图片或视频均可，按文件扩展名分派——图片走族的 formats/sizeLimit，音视频走本规则的 formats/maxBytes
+   *  （如 Kling omni 的 contents[].url 同时承载首尾帧图与 feature/base 视频） */
+  type: "image" | "media" | "auto";
   encoding: MediaEncoding;
   /** 对象 / 对象数组里承载文件的子路径（点路径，数组自动逐项展开）；缺省 = 值本身（字符串或字符串数组） */
   keys?: string[];
@@ -323,6 +327,13 @@ const MEDIA = (encoding: MediaEncoding, keys?: string[], limits: { formats?: str
   keys,
   ...limits,
 });
+/** 图片或视频均可（按扩展名分派）：图片走族的 formats/sizeLimit，音视频走 limits 的 formats/maxBytes */
+const AUTO = (encoding: MediaEncoding, keys?: string[], limits: { formats?: string[]; maxBytes?: number } = {}): MediaSpec => ({
+  type: "auto",
+  encoding,
+  keys,
+  ...limits,
+});
 
 /** 提示词（默认必填，extra.required 可覆盖） */
 const PROMPT = (desc = T("提示词", "Prompt"), extra: Extra = {}) => S("prompt", desc, { required: true, ...extra });
@@ -374,7 +385,7 @@ const HY_IMAGE_V35: FamilySpec = {
   models: ["hy-image-v3.5-preview"],
   sync: true,
   sizeLimit: 20_000_000,
-  formats: ["jpeg", "png", "webp"],
+  formats: ["jpeg", "png"],
   params: [
     A("messages", T("多轮会话内容（时间从旧到新，最后一条 role=user 为本轮生图指令）", "Multi-turn messages (oldest first; the last role=user is this turn's instruction)"), {
       required: true,
@@ -398,9 +409,7 @@ const HY_IMAGE_V35: FamilySpec = {
     }),
     S("size", T("宽x高，宽高 [256,8192]，面积 ≤16777216", "WxH, sides [256,8192], area <= 16777216")),
     N("seed", T("随机种子 [0, 2^63-1]（0 或不传 = 随机）", "Random seed [0, 2^63-1] (0/absent = random)")),
-    N("generate_max_pixels", T("目标面积档位（1K/1.5K 默认/2K；仅在未传 size 时生效）", "Target area tier (1K/1.5K default/2K; only when size is absent)"), {
-      choices: [1048576, 2359296, 4194304],
-    }),
+    N("generate_max_pixels", T("目标面积档位（1K/1.5K 默认/2K；非档位值服务端按最近面积归档；仅未传 size 时生效）", "Target area tier (1K/1.5K default/2K; non-tier values are snapped to the nearest tier server-side; only when size is absent)")),
     N("resize_max_pixels", T("参考图面积上限（像素数，超出等比缩放；默认 1048576）", "Reference image area cap (pixels; default 1048576)")),
     S("session", T("会话 ID（多轮编辑一致性调度）", "Session ID (consistent scheduling across turns)")),
     S("footnote", T("水印内容，右下角，≤16 字符", "Watermark text, bottom-right, <=16 chars")),
@@ -461,7 +470,7 @@ const WAND_IMAGE: FamilySpec = {
   formats: ["png", "jpeg"],
   params: [
     PROMPT(T("文本提示词（≤8192 字符）", "Prompt (<=8192 chars)")),
-    A("input", T("多模态输入（图生图 / 参考图）", "Multimodal input (image-to-image / reference)"), {
+    A("input", T("多模态输入（图生图 / 参考图，0~10 张，URL 或本地文件，单张 ≤20MB）", "Multimodal input (image-to-image / reference, 0-10 images, URL or local file, each <=20MB)"), {
       media: IMG("dataUrl", ["content.image_url"]),
       fields: [
         F("content", "array", T("输入块", "Input blocks"), {
@@ -568,7 +577,9 @@ const KLING_IMAGE: FamilySpec = {
     const body = (resp["data"] && typeof resp["data"] === "object" ? resp["data"] : resp) as Obj;
     // 单图在 task_result.images；组图（result_type=series）在 task_result.series_images（此时 images 为空数组）
     const urls = [...urlsOf(pick(body, "task_result.images")), ...urlsOf(pick(body, "task_result.series_images"))];
-    return result(normalizeState(body["task_status"]), urls, body);
+    // 水印版本（watermark_info.enabled=true 时返回）放 extras，与原图分开
+    const wmUrls = [...urlsOf(pick(body, "task_result.images"), "watermark_url"), ...urlsOf(pick(body, "task_result.series_images"), "watermark_url")];
+    return result(normalizeState(body["task_status"]), urls, body, wmUrls);
   },
 };
 
@@ -585,7 +596,7 @@ const HY_VIDEO: FamilySpec = {
   params: [
     S("prompt", T("提示词（文生必填，图生可选）", "Prompt (required for text-to-video)")),
     S("negative_prompt", T("负向提示词", "Negative prompt")),
-    S("image", T("首帧图 Base64（可传本地文件；与 image_url 二选一）", "First-frame image Base64 (local file allowed; either this or image_url)"), { media: IMG("raw") }),
+    S("image", T("首帧图 Base64（可传本地文件，自动转 data URL 前缀；与 image_url 二选一）", "First-frame image Base64 (local file allowed, data-URL prefixed; either this or image_url)"), { media: IMG("dataUrl") }),
     S("image_url", T("首帧图公网 URL（与 image 二选一）", "First-frame image public URL (either this or image)"), { media: IMG("urlOnly") }),
     N("n", T("输出视频数量", "Number of videos")),
     N("duration", T("视频时长（秒，当前固定 5）", "Duration in seconds (currently fixed at 5)")),
@@ -610,10 +621,10 @@ const HY_VIDEO: FamilySpec = {
 };
 
 /** Kling 的 contents 数组字段 */
-const KLING_CONTENT_FIELDS = (types: string[], extra: ParamField[] = []): ParamField[] => [
+const KLING_CONTENT_FIELDS = (types: string[], extra: ParamField[] = [], urlDesc?: ParamText): ParamField[] => [
   F("type", "string", T("素材类型", "Block type"), { required: true, choices: types }),
   F("text", "string", T("提示词（type=prompt）", "Prompt text (type=prompt)")),
-  F("url", "string", T("图片 / 视频素材（图片可为本地文件，视频仅 URL）", "Image / video material (image may be a local file; video URL only)")),
+  F("url", "string", urlDesc ?? T("图片 / 视频素材（图片可为本地文件，视频仅 URL）", "Image / video material (image may be a local file; video URL only)")),
   F("element_id", "string", T("主体 ID（type=element）", "Element ID (type=element)")),
   ...extra,
   F("id", "string", T("素材索引 ID（多素材引用）", "Block index ID (multi-block reference)")),
@@ -624,11 +635,111 @@ const KLING_OPTIONS = O("options", T("通用配置", "Options"), [
   F("watermark_info", "object", T("水印结果开关", "Watermarked result switch"), { fields: [F("enabled", "boolean", T("开关", "On/off"))] }),
 ]);
 
-const KLING_SET_RESOLUTION = F("resolution", "string", T("清晰度（V3：720p/1080p/4k；其余 720p/1080p）", "Resolution (V3: 720p/1080p/4k; others 720p/1080p)"));
-const KLING_SET_RATIO = F("aspect_ratio", "string", T("画面宽高比（默认 16:9）", "Aspect ratio (default 16:9)"), { choices: ["16:9", "9:16", "1:1"] });
-const KLING_SET_DURATION = F("duration", "integer", T("时长秒（V3/V3-Turbo 3~15；V2.6/V2.5-Turbo 5/10）", "Duration sec (V3/V3-Turbo 3~15; V2.6/V2.5-Turbo 5/10)"));
-const KLING_SET_MULTI_SHOT = F("multi_shot", "boolean", T("多镜头（仅 V3，默认 true）", "Multi-shot (V3 only, default true)"));
-const KLING_SET_AUDIO = (choices: string[]) => F("audio", "string", T("音频", "Audio"), { choices });
+// ---- Kling 生视频（以《Kling 生视频调用指南》为准，文档 1823/135742） ----
+const KV4 = "kling-video-v4";
+const KV3 = "kling-video-v3";
+const KV3_TURBO = "kling-video-v3-turbo";
+const KV26 = "kling-video-v2.6";
+const KV25_TURBO = "kling-video-v2.5-turbo";
+const KV3_OMNI = "kling-video-v3-omni";
+const KO1 = "kling-video-o1";
+const KMC30 = "kling-video-motion-control-v3.0";
+
+const KLING_SET_RESOLUTION = F("resolution", "string", T("清晰度（4k 仅 V3 / V3-Omni；默认 v4 1080p，其余 720p）", "Resolution (4k: V3 / V3-Omni only; default 1080p for v4, 720p otherwise)"), { choices: ["720p", "1080p", "4k"] });
+const KLING_SET_RATIO = F("aspect_ratio", "string", T("画面宽高比（21:9 仅 v4；默认 16:9）", "Aspect ratio (21:9: v4 only; default 16:9)"), { choices: ["16:9", "9:16", "1:1", "21:9"] });
+const KLING_SET_RATIO_OMNI = F("aspect_ratio", "string", T("画面宽高比（21:9 / adaptive 仅 v4，v4 默认 adaptive；V3-Omni / O1 默认 16:9，无首帧时必填）", "Aspect ratio (21:9 / adaptive: v4 only, v4 defaults to adaptive; V3-Omni / O1 default 16:9, required without a first frame)"), { choices: ["16:9", "9:16", "1:1", "21:9", "adaptive"] });
+const KLING_SET_DURATION = F("duration", "integer", T("时长秒（v4 3~30；V3 / V3-Turbo / V3-Omni 3~15；O1 3~10；V2.6 / V2.5-Turbo 5 或 10；默认 5）", "Duration sec (v4 3~30; V3 / V3-Turbo / V3-Omni 3~15; O1 3~10; V2.6 / V2.5-Turbo 5 or 10; default 5)"));
+const KLING_SET_MULTI_SHOT = (models: string[]) => F("multi_shot", "boolean", T("多镜头（默认 true）", "Multi-shot (default true)"), { models });
+const KLING_SET_AUDIO = (choices: string[], desc: ParamText, models?: string[]) => F("audio", "string", desc, { choices, models });
+
+/** 时长取值：区间（含端点，整数）或离散枚举 */
+const KLING_DURATION: Record<string, { min: number; max: number } | number[]> = {
+  [KV4]: { min: 3, max: 30 },
+  [KV3]: { min: 3, max: 15 },
+  [KV3_TURBO]: { min: 3, max: 15 },
+  [KV3_OMNI]: { min: 3, max: 15 },
+  [KO1]: { min: 3, max: 10 },
+  [KV26]: [5, 10],
+  [KV25_TURBO]: [5, 10],
+};
+
+/** 各素材类型的必带字段 */
+const KLING_BLOCK_NEEDS: Record<string, string[]> = {
+  prompt: ["text"],
+  first_frame: ["url"],
+  last_frame: ["url"],
+  refer_image: ["url"],
+  feature_video: ["url"],
+  base_video: ["url"],
+  image: ["url"],
+  video: ["url"],
+  element: ["element_id"],
+  voice: ["voice_id", "id"],
+};
+
+const isUrl = (v: unknown): boolean => typeof v === "string" && /^https?:\/\//i.test(v);
+const blocksOf = (body: Obj): Obj[] => (Array.isArray(body["contents"]) ? (body["contents"] as Obj[]) : []).filter((b) => b && typeof b === "object");
+const settingsOf = (body: Obj): Obj => {
+  const s = body["settings"];
+  return s && typeof s === "object" && !Array.isArray(s) ? (s as Obj) : {};
+};
+
+/**
+ * 提示词长度：v4 中英加权（英文 ÷26000 + 非英文 ÷11000 ≤ 1）；long 内的模型 ≤3072；其余 ≤2500。
+ * long 按接口给：文生 [V3]、全能 [V3-Omni]、图生 []（图生 contents[].text 统一 ≤2500）
+ */
+function klingPromptError(model: string, text: string, key: string, long: string[]): string | undefined {
+  const chars = [...text];
+  if (model === KV4) {
+    const en = chars.filter((c) => c.codePointAt(0)! < 128).length;
+    const other = chars.length - en;
+    return en / 26000 + other / 11000 > 1 ? t("gen.rule.kling.v4PromptTooLong", { key, en, other }) : undefined;
+  }
+  const max = long.includes(model) ? 3072 : 2500;
+  return chars.length > max ? t("gen.check.tooLong", { key, len: chars.length, max, model }) : undefined;
+}
+
+/** contents 通用：素材类型白名单、必带字段、id 唯一、提示词长度；text 只能放 type=prompt 块 */
+function klingBlocksError(model: string, blocks: Obj[], allowed: string[], long: string[] = []): string | undefined {
+  const ids = new Set<string>();
+  for (const b of blocks) {
+    const type = String(b["type"]);
+    if (!allowed.includes(type)) return t("gen.rule.kling.typeUnsupported", { type, model, types: allowed.join(" / ") });
+    for (const field of KLING_BLOCK_NEEDS[type] ?? []) {
+      if (!has(b, field)) return t("gen.rule.kling.blockField", { type, field });
+    }
+    // Kling 1201：text 挂在素材块上会被识别为「没有 prompt 块」，报 prompt must have non-blank text
+    if (type !== "prompt" && typeof b["text"] === "string" && b["text"].trim()) {
+      return t("gen.rule.kling.textOnlyPrompt", { type });
+    }
+    const id = str(b["id"]);
+    if (id) {
+      if (ids.has(id)) return t("gen.rule.kling.dupId", { id });
+      ids.add(id);
+    }
+    if (type === "prompt" && typeof b["text"] === "string") {
+      const err = klingPromptError(model, b["text"], "contents[].text", long);
+      if (err) return err;
+    }
+  }
+  return undefined;
+}
+
+/** settings 通用：4k / 21:9 / adaptive 的模型限定、时长取值 */
+function klingSettingsError(model: string, s: Obj): string | undefined {
+  if (s["resolution"] === "4k" && model !== KV3 && model !== KV3_OMNI) return t("gen.rule.kling.res4k", { model });
+  const ratio = s["aspect_ratio"];
+  if ((ratio === "21:9" || ratio === "adaptive") && model !== KV4) return t("gen.rule.kling.ratioV4Only", { ratio, model });
+  const spec = KLING_DURATION[model];
+  if (spec && s["duration"] !== undefined) {
+    const d = Number(s["duration"]);
+    const okd = Array.isArray(spec) ? spec.includes(d) : Number.isInteger(d) && d >= spec.min && d <= spec.max;
+    if (!okd) return t("gen.rule.kling.duration", { model, allowed: Array.isArray(spec) ? spec.join(" / ") : `${spec.min}~${spec.max}` });
+  }
+  return undefined;
+}
+
+const countOf = (types: string[], ...want: string[]): number => types.filter((x) => want.includes(x)).length;
 
 function klingParse(resp: Obj): TaskResult {
   // 查询响应是 data 数组（每项一个任务），也兼容单对象
@@ -640,9 +751,10 @@ function klingParse(resp: Obj): TaskResult {
 const KLING_VIDEO: FamilySpec = {
   id: "kling-video",
   vendor: "kling",
-  maxPromptChars: 3072,
+  // 族级上限取最大者（v4 纯英文 26000）；按模型的精确上限（v4 中英加权 / V3 3072 / 其余 2500）在 validateBody 里校验
+  maxPromptChars: 26000,
   kind: "video",
-  models: ["kling-video-v3", "kling-video-v3-turbo", "kling-video-v2.6", "kling-video-v2.5-turbo"],
+  models: [KV4, KV3, KV3_TURBO, KV26, KV25_TURBO],
   sync: false,
   sizeLimit: 50_000_000,
   formats: ["jpeg", "png"],
@@ -650,21 +762,69 @@ const KLING_VIDEO: FamilySpec = {
   apis: {
     "text-to-video": {
       params: [
-        PROMPT(T("提示词（≤3072 字符；V3 支持多镜头语法）", "Prompt (<=3072 chars; V3 supports multi-shot syntax)")),
-        O("settings", T("输出配置", "Output settings"), [KLING_SET_RESOLUTION, KLING_SET_RATIO, KLING_SET_DURATION, KLING_SET_MULTI_SHOT, KLING_SET_AUDIO(["native", "off"])]),
+        PROMPT(T("提示词（v4：纯英文 ≤26000 / 纯非英文 ≤11000，混合按 英文÷26000+非英文÷11000≤1；V3 ≤3072 且支持多镜头语法；V3-Turbo / V2.6 / V2.5-Turbo ≤2500）", "Prompt (v4: English <=26000 / non-English <=11000, mixed: en/26000+other/11000<=1; V3 <=3072 with multi-shot syntax; V3-Turbo / V2.6 / V2.5-Turbo <=2500)")),
+        O("settings", T("输出配置（v4 / V3-Turbo / V2.5-Turbo 仅 resolution / aspect_ratio / duration）", "Output settings (v4 / V3-Turbo / V2.5-Turbo: resolution / aspect_ratio / duration only)"), [
+          KLING_SET_RESOLUTION,
+          KLING_SET_RATIO,
+          KLING_SET_DURATION,
+          KLING_SET_MULTI_SHOT([KV3]),
+          KLING_SET_AUDIO(["native", "off"], T("音频（native 原生音频 / off 默认；V2.6 native 仅 1080p）", "Audio (native / off by default; V2.6 native requires 1080p)"), [KV3, KV26]),
+        ]),
         KLING_OPTIONS,
       ],
+      validateBody: (body) => {
+        const model = str(body["model"]) ?? "";
+        const s = settingsOf(body);
+        if (typeof body["prompt"] === "string") {
+          const err = klingPromptError(model, body["prompt"], "prompt", [KV3]);
+          if (err) return err;
+        }
+        const err = klingSettingsError(model, s);
+        if (err) return err;
+        if (model === KV26 && s["audio"] === "native" && s["resolution"] !== "1080p") return t("gen.rule.kling.v26Native1080p");
+        return undefined;
+      },
     },
     "image-to-video": {
       params: [
-        A("contents", T("参考素材集合（首帧 / 尾帧 / 主体 / 音色 / 提示词）", "Reference blocks (first/last frame, element, voice, prompt)"), {
+        A("contents", T("参考素材集合（须含 prompt 与 first_frame；尾帧可选；element 仅 V3 ≤3 个；voice 仅 V3 / V2.6 ≤2 个；图片 url 可为本地文件，v4 单张 ≤30MB）", "Reference blocks (prompt and first_frame required; last_frame optional; element: V3 only, <=3; voice: V3 / V2.6 only, <=2; image url may be a local file, v4 <=30MB each)"), {
           required: true,
-          media: IMG("raw", ["url"]),
-          fields: KLING_CONTENT_FIELDS(["prompt", "first_frame", "last_frame", "element", "voice"], [F("voice_id", "string", T("音色 ID（type=voice）", "Voice ID (type=voice)"))]),
+          media: IMG("dataUrl", ["url"]),
+          fields: KLING_CONTENT_FIELDS(["prompt", "first_frame", "last_frame", "element", "voice"], [F("voice_id", "string", T("音色 ID（type=voice，需同时给 id）", "Voice ID (type=voice; id required too)"))]),
         }),
-        O("settings", T("输出配置（图生无 aspect_ratio）", "Output settings (no aspect_ratio for image-to-video)"), [KLING_SET_RESOLUTION, KLING_SET_DURATION, KLING_SET_MULTI_SHOT, KLING_SET_AUDIO(["native", "off"])]),
+        O("settings", T("输出配置（图生无 aspect_ratio，画幅跟随首帧）", "Output settings (no aspect_ratio; follows the first frame)"), [
+          KLING_SET_RESOLUTION,
+          KLING_SET_DURATION,
+          KLING_SET_MULTI_SHOT([KV3]),
+          KLING_SET_AUDIO(["native", "off"], T("音频（native / off 默认；引用音色时不能为 off；V2.6 native 仅 1080p）", "Audio (native / off by default; cannot be off with a voice; V2.6 native requires 1080p)"), [KV3, KV26]),
+        ]),
         KLING_OPTIONS,
       ],
+      validateBody: (body) => {
+        const model = str(body["model"]) ?? "";
+        const s = settingsOf(body);
+        const blocks = blocksOf(body);
+        const types = blocks.map((b) => String(b["type"]));
+        const allowed: Record<string, string[]> = {
+          [KV4]: ["prompt", "first_frame", "last_frame"],
+          [KV3]: ["prompt", "first_frame", "last_frame", "element", "voice"],
+          [KV26]: ["prompt", "first_frame", "last_frame", "voice"],
+          [KV3_TURBO]: ["prompt", "first_frame", "last_frame"],
+          [KV25_TURBO]: ["prompt", "first_frame", "last_frame"],
+        };
+        const err = klingBlocksError(model, blocks, allowed[model] ?? []) ?? klingSettingsError(model, s);
+        if (err) return err;
+        if (!types.includes("prompt") || !types.includes("first_frame")) return t("gen.rule.kling.i2vNeedPromptFrame");
+        if (countOf(types, "first_frame") > 1 || countOf(types, "last_frame") > 1) return t("gen.rule.kling.oneFrameEach");
+        if (countOf(types, "element") > 3) return t("gen.rule.kling.tooMany", { type: "element", max: 3 });
+        if (countOf(types, "voice") > 2) return t("gen.rule.kling.tooMany", { type: "voice", max: 2 });
+        if (types.includes("voice") && (s["audio"] === undefined || s["audio"] === "off")) return t("gen.rule.kling.voiceNeedsAudio");
+        const lastFrame = types.includes("last_frame");
+        if (model === KV26 && lastFrame && s["resolution"] !== undefined && s["resolution"] !== "720p") return t("gen.rule.kling.v26Frames720p");
+        if (model === KV26 && s["audio"] === "native" && s["resolution"] !== "1080p") return t("gen.rule.kling.v26Native1080p");
+        if (model === KV25_TURBO && lastFrame && s["resolution"] !== "1080p") return t("gen.rule.kling.v25Frames1080p");
+        return undefined;
+      },
     },
   },
   taskIdOf: (resp) => firstStr(resp, "data.task_id", "data.id", "task_id"),
@@ -672,31 +832,36 @@ const KLING_VIDEO: FamilySpec = {
   parse: klingParse,
 };
 
-/** Kling Omni（v3-omni / o1）：全模态视频生成 + 编辑 */
+/**
+ * Kling 全能视频（omni-video）：v4 / V3-Omni / O1。
+ * 族 models 只放 V3-Omni / O1（模型 ID 全局唯一，v4 归 kling-video 族）；接口白名单在 APIS 里单独加 v4。
+ */
 const KLING_VIDEO_OMNI: FamilySpec = {
   id: "kling-video-omni",
   vendor: "kling",
-  maxPromptChars: 3072,
+  // contents[].text 的按模型上限在 validateBody 里校验（顶层无 prompt）
+  maxPromptChars: 26000,
   kind: "video",
-  models: ["kling-video-v3-omni", "kling-video-o1"],
+  models: [KV3_OMNI, KO1],
   sync: false,
   sizeLimit: 50_000_000,
   formats: ["jpeg", "png"],
   params: [
-    A("contents", T("多模态参考素材集合", "Multimodal reference blocks"), {
+    A("contents", T("多模态参考素材集合（V3-Omni / O1：图片 / 视频 url 均可为本地文件，图片 jpg/jpeg/png ≤50MB，视频 mp4/mov ≤75MB；v4：视频仅 URL（≤300MB、3~30 秒），图片 ≤30MB ≤10 张，参考视频 ≤5 段，主体 ≤7，音色 ≤3，素材合计 ≤15，可在 prompt 中以 @image_1 / @video_1 / @element_1 引用）", "Multimodal reference blocks (V3-Omni / O1: image / video url may be local files, image jpg/jpeg/png <=50MB, video mp4/mov <=75MB; v4: video URL only (<=300MB, 3~30 s), images <=30MB and <=10, videos <=5, elements <=7, voices <=3, <=15 in total; reference as @image_1 / @video_1 / @element_1)"), {
       required: true,
-      media: IMG("raw", ["url"]),
+      media: AUTO("dataUrl", ["url"], { formats: ["mp4", "mov"], maxBytes: 75_000_000 }),
       fields: KLING_CONTENT_FIELDS(
         ["prompt", "first_frame", "last_frame", "refer_image", "feature_video", "base_video", "element", "voice"],
-        [F("voice_id", "string", T("音色 ID（type=voice）", "Voice ID (type=voice)"))],
+        [F("voice_id", "string", T("音色 ID（type=voice，需同时给 id，prompt 中以 @id 引用）", "Voice ID (type=voice; id required too, referenced as @id)"))],
+        T("图片 / 视频素材（V3-Omni / O1 均可为本地文件；v4 视频仅 URL（≤300MB），图片本地 ≤30MB）", "Image / video material (V3-Omni / O1: local files allowed; v4: video URL only (<=300MB), local images <=30MB)"),
       ),
     }),
-    O("settings", T("输出配置（无首帧时 aspect_ratio 必填，含参考视频 feature_video / base_video 场景）", "Output settings (aspect_ratio required without a first frame, including feature_video / base_video)"), [
+    O("settings", T("输出配置（V3-Omni / O1 无首帧时 aspect_ratio 必填，含参考视频场景；v4 仅 resolution / aspect_ratio / duration）", "Output settings (V3-Omni / O1: aspect_ratio required without a first frame, reference videos included; v4: resolution / aspect_ratio / duration only)"), [
       KLING_SET_RESOLUTION,
-      KLING_SET_RATIO,
+      KLING_SET_RATIO_OMNI,
       KLING_SET_DURATION,
-      KLING_SET_MULTI_SHOT,
-      KLING_SET_AUDIO(["native", "off", "original"]),
+      KLING_SET_MULTI_SHOT([KV3_OMNI]),
+      KLING_SET_AUDIO(["native", "original", "off"], T("音频（V3-Omni：native / original / off；O1：original / off；默认 off；original=保留参考视频原声）", "Audio (V3-Omni: native / original / off; O1: original / off; default off; original keeps the reference video's sound)"), [KV3_OMNI, KO1]),
     ]),
     KLING_OPTIONS,
   ],
@@ -706,21 +871,70 @@ const KLING_VIDEO_OMNI: FamilySpec = {
     'Video edit / reference example (settings.aspect_ratio is required without a first frame, reference videos included):\n--contents \'[{"type":"prompt","text":"night background"},{"type":"base_video","url":"https://…/in.mp4"}]\' --settings \'{"aspect_ratio":"16:9"}\'\nReference videos (feature_video / base_video) need a sample aspect ratio (SAR) of exactly 1:1, otherwise "PAR should be 1:1"; re-encode first: ffmpeg -i in.mp4 -vf setsar=1 -c:a copy out.mp4',
   ),
   validateBody: (body) => {
-    const contents = (Array.isArray(body["contents"]) ? body["contents"] : []) as Obj[];
-    const types = contents.map((c) => String(c?.["type"]));
+    const model = str(body["model"]) ?? "";
+    const s = settingsOf(body);
+    const blocks = blocksOf(body);
+    const types = blocks.map((b) => String(b["type"]));
+    const all = ["prompt", "first_frame", "last_frame", "refer_image", "feature_video", "base_video", "element", "voice"];
+    if (model === KV4 && types.includes("base_video")) return t("gen.rule.omni.v4NoBaseVideo");
+    const err = klingBlocksError(model, blocks, all, [KV3_OMNI]) ?? klingSettingsError(model, s);
+    if (err) return err;
+    if (countOf(types, "first_frame") > 1 || countOf(types, "last_frame") > 1) return t("gen.rule.kling.oneFrameEach");
+    if (types.includes("last_frame") && !types.includes("first_frame")) return t("gen.rule.kling.lastNeedsFirst");
+    const images = countOf(types, "first_frame", "last_frame", "refer_image");
+    const videos = countOf(types, "feature_video", "base_video");
+    const elements = countOf(types, "element");
+    const voices = countOf(types, "voice");
+
+    if (model === KV4) {
+      // v4：不支持 base_video（已在类型白名单拦）与 settings.audio；视频仅 URL；数量上限
+      if (has(s, "audio")) return t("gen.rule.omni.v4NoAudio");
+      if (blocks.some((b) => b["type"] === "feature_video" && !isUrl(b["url"]))) return t("gen.rule.kling.v4VideoUrlOnly");
+      // v4 图片单张 ≤30MB（调用指南；族级 sizeLimit 50MB 不适用）：本地文件已被编码为 data URL，
+      // 按 Base64 载荷长度估算原始字节（误差 ≤2B）；远程 URL 大小属内容属性，由服务端校验
+      if (blocks.some((b) => {
+        if (!["first_frame", "last_frame", "refer_image"].includes(String(b["type"]))) return false;
+        const u = typeof b["url"] === "string" ? (b["url"] as string) : "";
+        return /^data:image\//i.test(u) && Math.floor(((u.length - u.indexOf(",") - 1) * 3) / 4) > 30_000_000;
+      })) return t("gen.rule.kling.v4ImageMax30m");
+      if (images > 10) return t("gen.rule.kling.tooMany", { type: "image", max: 10 });
+      if (videos > 5) return t("gen.rule.kling.tooMany", { type: "feature_video", max: 5 });
+      // 调用指南另有「有视频角色主体时，视频角色主体与参考视频合计 ≤5」：element 块只有 element_id、
+      // 不区分图片/视频主体，本地无从判定，交服务端校验（主体 ≤7 已在下方拦截）
+      if (elements > 7) return t("gen.rule.kling.tooMany", { type: "element", max: 7 });
+      if (voices > 3) return t("gen.rule.kling.tooMany", { type: "voice", max: 3 });
+      if (images + videos + elements + voices > 15) return t("gen.rule.kling.v4TotalMax");
+      return undefined;
+    }
+
+    // V3-Omni / O1
     // 服务端实测：只有传了首帧才能省略 aspect_ratio（画幅跟随首帧）；feature_video 参考、base_video 编辑都要求传，
     // 官方文档写的「无首帧且无参考视频时必填」与服务端不一致，以服务端为准
-    if (!types.includes("first_frame") && !pick(body, "settings.aspect_ratio")) {
-      const video = types.find((t) => t === "feature_video" || t === "base_video");
-      return video
-        ? t("gen.rule.omni.ratioWithVideo", { video })
-        : t("gen.rule.omni.ratioNoFirstFrame");
+    if (!types.includes("first_frame") && !has(s, "aspect_ratio")) {
+      const video = types.find((x) => x === "feature_video" || x === "base_video");
+      return video ? t("gen.rule.omni.ratioWithVideo", { video }) : t("gen.rule.omni.ratioNoFirstFrame");
     }
-    // O1：除提示词与首帧外没有其他参考（参考图 / 尾帧 / 主体 / 视频）时，时长只支持 5 / 10
-    const duration = pick(body, "settings.duration");
-    const onlyPromptOrFirstFrame = types.every((t) => t === "prompt" || t === "first_frame");
-    if (str(body["model"]) === "kling-video-o1" && onlyPromptOrFirstFrame && duration !== undefined && ![5, 10].includes(Number(duration))) {
-      return t("gen.rule.omni.o1Duration");
+    if (videos > 1) return t("gen.rule.kling.tooMany", { type: "feature_video / base_video", max: 1 });
+    if (types.includes("feature_video") && types.includes("last_frame")) return t("gen.rule.kling.featureNoLastFrame");
+    if (types.includes("base_video")) {
+      if (types.includes("first_frame") || types.includes("last_frame")) return t("gen.rule.kling.baseNoFrames");
+      if (s["multi_shot"] === true) return t("gen.rule.kling.baseNoMultiShot");
+      if (s["audio"] === "native") return t("gen.rule.kling.baseNoNative");
+    }
+    const refMax = videos ? 4 : 7;
+    if (countOf(types, "refer_image") + elements > refMax) return t("gen.rule.kling.referMax", { max: refMax });
+    if (voices > 2) return t("gen.rule.kling.tooMany", { type: "voice", max: 2 });
+    if (voices && (s["audio"] === undefined || s["audio"] === "off")) return t("gen.rule.kling.voiceNeedsAudio");
+    if (model === KO1) {
+      if (s["audio"] === "native") return t("gen.rule.kling.o1Audio");
+      if (types.includes("last_frame") && (types.includes("refer_image") || elements)) return t("gen.rule.kling.o1FramesExclusive");
+      // O1：除提示词与首帧外没有其他参考（参考图 / 尾帧 / 主体 / 视频）时，时长只支持 5 / 10
+      const onlyPromptOrFirstFrame = types.every((x) => x === "prompt" || x === "first_frame");
+      if (onlyPromptOrFirstFrame && s["duration"] !== undefined && ![5, 10].includes(Number(s["duration"]))) return t("gen.rule.omni.o1Duration");
+    }
+    if (model === KV3_OMNI && types.includes("feature_video")) {
+      if (s["audio"] !== undefined && s["audio"] !== "off") return t("gen.rule.kling.featureAudioOff");
+      if (s["multi_shot"] === false) return t("gen.rule.kling.featureMultiShot");
     }
     return undefined;
   },
@@ -740,23 +954,32 @@ const KLING_MOTION_CONTROL: FamilySpec = {
   sizeLimit: 50_000_000,
   formats: ["jpeg", "png"],
   params: [
-    A("contents", T("参考素材合集（须含 type=image 形象图与 type=video 动作视频）", "Reference blocks (must include a type=image character image and a type=video motion video)"), {
+    A("contents", T("参考素材合集（须含 type=image 形象图与 type=video 动作视频，视频仅 URL；element 仅 v3.0 且最多 1 个，需同时给 id；prompt ≤2500）", "Reference blocks (type=image character image and type=video motion video required, video URL only; element: v3.0 only, at most 1, id required; prompt <=2500)"), {
       required: true,
       media: IMG("dataUrl", ["url"]),
       fields: KLING_CONTENT_FIELDS(["prompt", "image", "video", "element"]),
     }),
-    O("settings", T("输出配置", "Output settings"), [
-      F("character_orientation", "string", T("人物朝向参考", "Character orientation"), { required: true, choices: ["image", "video"] }),
-      KLING_SET_AUDIO(["original", "off"]),
+    O("settings", T("输出配置（无 duration，输出时长跟随动作视频）", "Output settings (no duration; follows the motion video)"), [
+      F("character_orientation", "string", T("人物朝向：image 与形象图一致（参考视频 ≤10s）/ video 与动作视频一致（≤30s）；引用主体时只能 video", "Character orientation: image (motion video <=10s) / video (<=30s); must be video with an element"), { required: true, choices: ["image", "video"] }),
+      KLING_SET_AUDIO(["original", "off"], T("音频（original 保留参考视频原声，默认 / off 无声）", "Audio (original keeps the reference sound, default / off silent)")),
       F("resolution", "string", T("清晰度（默认 720p）", "Resolution (default 720p)"), { choices: ["720p", "1080p"] }),
     ], { required: true }),
     KLING_OPTIONS,
   ],
   doc: "https://cloud.tencent.com/document/product/1823/135742",
   validateBody: (body) => {
-    const contents = (Array.isArray(body["contents"]) ? body["contents"] : []) as Obj[];
-    if (!contents.some((b) => b?.["type"] === "image")) return t("gen.rule.motion.needImage");
-    if (!contents.some((b) => b?.["type"] === "video")) return t("gen.rule.motion.needVideo");
+    const model = str(body["model"]) ?? "";
+    const blocks = blocksOf(body);
+    const types = blocks.map((b) => String(b["type"]));
+    if (!types.includes("image")) return t("gen.rule.motion.needImage");
+    if (!types.includes("video")) return t("gen.rule.motion.needVideo");
+    const allowed = model === KMC30 ? ["prompt", "image", "video", "element"] : ["prompt", "image", "video"];
+    const err = klingBlocksError(model, blocks, allowed);
+    if (err) return err;
+    if (blocks.some((b) => b["type"] === "video" && !isUrl(b["url"]))) return t("gen.rule.motion.videoUrlOnly");
+    if (countOf(types, "element") > 1) return t("gen.rule.kling.tooMany", { type: "element", max: 1 });
+    if (blocks.some((b) => b["type"] === "element" && !has(b, "id"))) return t("gen.rule.kling.blockField", { type: "element", field: "id" });
+    if (types.includes("element") && settingsOf(body)["character_orientation"] !== "video") return t("gen.rule.motion.elementOrientation");
     return undefined;
   },
   taskIdOf: (resp) => firstStr(resp, "data.task_id", "data.id", "task_id"),
@@ -809,7 +1032,7 @@ const VIDU_VIDEO: FamilySpec = {
       ],
     },
     "image-to-video": {
-      models: ["vidu-video-q4-preview", "vidu-video-q3-turbo", "vidu-video-q3-pro", "vidu-video-q2-pro", "vidu-video-q2-turbo"],
+      models: ["vidu-video-q4-preview", "vidu-video-q3-turbo", "vidu-video-q3-pro", "vidu-video-q3", "vidu-video-q2", "vidu-video-q2-pro", "vidu-video-q2-turbo"],
       params: [
         VIDU_IMAGES(T("首帧图（1 张，URL 或本地文件）", "First-frame image (1; URL or local file)"), true),
         S("prompt", T("提示词（≤5000 字符）", "Prompt (<=5000 chars)")),
@@ -825,7 +1048,7 @@ const VIDU_VIDEO: FamilySpec = {
       ],
     },
     "start-end-to-video": {
-      models: ["vidu-video-q3-turbo", "vidu-video-q3-pro", "vidu-video-q2-pro", "vidu-video-q2-turbo"],
+      models: ["vidu-video-q3-turbo", "vidu-video-q3-pro", "vidu-video-q3", "vidu-video-q2", "vidu-video-q2-pro", "vidu-video-q2-turbo"],
       params: [
         VIDU_IMAGES(T("首尾帧（2 张，分辨率相近；URL 或本地文件）", "First and last frames (2, similar resolution; URL or local file)"), true),
         S("prompt", T("提示词（≤5000 字符）", "Prompt (<=5000 chars)")),
@@ -839,19 +1062,19 @@ const VIDU_VIDEO: FamilySpec = {
       ],
     },
     "reference-to-video": {
-      models: ["vidu-video-q4-preview", "vidu-video-q3-turbo", "vidu-video-q3", "vidu-video-q2", "vidu-video-q2-pro"],
+      models: ["vidu-video-q4-preview", "vidu-video-q3-turbo", "vidu-video-q3", "vidu-video-q2", "vidu-video-q2-pro", "vidu-video-q2-turbo"],
       params: [
         A("subjects", T("主体集合（方式一；与 images/videos 二选一；prompt 中 @name 引用）", "Subjects (mode 1; either this or images/videos; referenced as @name)"), {
-          media: [IMG("dataUrl", ["images"]), MEDIA("urlOnly", ["videos"])],
+          media: [IMG("dataUrl", ["images"]), MEDIA("dataUrl", ["videos"], { formats: ["mp4", "avi", "mov"], maxBytes: 20_000_000 })],
           fields: [
             F("name", "string", T("主体名称（prompt 中 @name 引用）", "Subject name (@name in prompt)"), { required: true }),
             F("images", "array", T("主体图片（最多 3 张，URL 或本地文件；与 videos 二选一）", "Subject images (up to 3; URL or local file; either this or videos)")),
-            F("videos", "array", T("主体视频（仅 q2-pro，公网 URL；与 images 二选一）", "Subject videos (q2-pro only, public URL; either this or images)")),
+            F("videos", "array", T("主体视频（仅 q2-pro，URL 或本地文件；与 images 二选一）", "Subject videos (q2-pro only, URL or local file; either this or images)")),
             F("voice_id", "string", T("主体音色 ID（q3 不生效）", "Subject voice ID (not for q3)")),
           ],
         }),
         VIDU_IMAGES(T("参考图（方式二，1~3 张，URL 或本地文件）", "Reference images (mode 2, 1~3; URL or local file)"), false),
-        A("videos", T("参考视频（方式二，公网 URL；仅 q2-pro）", "Reference videos (mode 2, public URL; q2-pro only)"), { models: ["vidu-video-q2-pro"], media: MEDIA("urlOnly") }),
+        A("videos", T("参考视频（方式二，URL 或本地文件；仅 q2-pro）", "Reference videos (mode 2, URL or local file; q2-pro only)"), { models: ["vidu-video-q2-pro"], media: MEDIA("dataUrl", undefined, { formats: ["mp4", "avi", "mov"], maxBytes: 20_000_000 }) }),
         PROMPT(T("提示词（主体式 ≤5000；直参式 ≤2000）", "Prompt (subjects mode <=5000; direct mode <=2000)")),
         B("auto_subjects", T("智能主体库（默认 false）", "Smart subject library (default false)")),
         VIDU_AUDIO,
@@ -868,6 +1091,12 @@ const VIDU_VIDEO: FamilySpec = {
         const hasMedia = has(body, "images") || has(body, "videos");
         if (hasSubjects === hasMedia) {
           return t("gen.rule.viduRef.exactlyOne");
+        }
+        // subjects[].videos 仅 q2-pro（TokenPlan 表格最终版 9-23）：其他模型本地先拦
+        if (str(body["model"]) !== "vidu-video-q2-pro") {
+          const subjects = (Array.isArray(body["subjects"]) ? body["subjects"] : []) as Obj[];
+          const withVideos = subjects.some((s) => Array.isArray(s?.["videos"]) && (s["videos"] as unknown[]).length > 0);
+          if (withVideos) return t("gen.rule.viduRef.videosQ2Pro");
         }
         return undefined;
       },
@@ -918,7 +1147,7 @@ const PIXVERSE: FamilySpec = {
     "image-to-video": {
       params: [
         PIX_IMG("img_id", T("首帧图（URL 或本地文件，<20MB）", "First-frame image (URL or local file, <20MB)")),
-        A("img_ids", T("多图模板图片数组（URL 或本地文件）", "Multi-image template images (URL or local file)"), { media: IMG("dataUrl") }),
+        A("img_ids", T("多图模板图片数组（仅公网 URL，0~7 张）", "Multi-image template images (public URL only, 0-7)"), { media: IMG("urlOnly") }),
         PIX_PROMPT,
         PIX_DURATION,
         PIX_QUALITY,
@@ -988,6 +1217,10 @@ const MINIMAX_V1: FamilySpec = {
       required: ["minimax-video-v2.3-fast"],
       media: IMG("dataUrl"),
     }),
+    S("last_frame_image", T("尾帧图（URL 或本地文件；v2.3 首尾帧模式条件必选，与 first_frame_image 搭配；v2.3-fast 不支持）", "Last-frame image (URL or local file; required for v2.3 first-and-last-frame mode, paired with first_frame_image; not supported by v2.3-fast)"), {
+      models: ["minimax-video-v2.3"],
+      media: IMG("dataUrl"),
+    }),
   ],
   doc: "https://cloud.tencent.com/document/product/1823/135737",
   validateBody: (body) => {
@@ -1011,6 +1244,21 @@ const CONTENT_FIELDS = (types: string[], roles: string[], media: Array<"image_ur
   F("role", "string", T("素材用途", "Material role"), { choices: roles }),
 ];
 
+/**
+ * content 数组内 text 块的长度校验：checkBody 的 maxPromptChars 只查顶层 prompt / text 键，
+ * 数组内块不覆盖（kling 的 contents[].text 由 klingPromptError 拦，MiniMax H3 / WAND vega 需族级自拦）。
+ */
+const contentTextLengthCheck = (max: number): ((body: Obj) => string | undefined) => (body) => {
+  const blocks = (Array.isArray(body["content"]) ? body["content"] : []) as Obj[];
+  for (const b of blocks) {
+    const text = typeof b?.["text"] === "string" ? b["text"] : undefined;
+    if (text && [...text].length > max) {
+      return t("gen.check.tooLong", { key: "content[].text", len: [...text].length, max, model: str(body["model"]) ?? "" });
+    }
+  }
+  return undefined;
+};
+
 const MINIMAX_V2: FamilySpec = {
   id: "minimax-video-v2",
   vendor: "minimax-h3",
@@ -1021,9 +1269,13 @@ const MINIMAX_V2: FamilySpec = {
   sizeLimit: 30_000_000,
   formats: ["jpeg", "png", "webp", "heic", "heif"],
   params: [
-    A("content", T("多模态素材数组（文生仅一个 text 块；图片 url 可为本地文件）", "Multimodal blocks (text-only = one text block; image url may be a local file)"), {
+    A("content", T("多模态素材数组（文生仅一个 text 块；图片 / 视频 / 音频 url 可为本地文件）", "Multimodal blocks (text-only = one text block; image / video / audio url may be a local file)"), {
       required: true,
-      media: IMG("dataUrl", ["image_url.url"]),
+      media: [
+        IMG("dataUrl", ["image_url.url"]),
+        MEDIA("dataUrl", ["video_url.url"], { formats: ["mp4", "mov"], maxBytes: 50_000_000 }),
+        MEDIA("dataUrl", ["audio_url.url"], { formats: ["wav", "mp3"], maxBytes: 15_000_000 }),
+      ],
       fields: CONTENT_FIELDS(["text", "image_url", "video_url", "audio_url"], ["first_frame", "last_frame", "reference_image", "reference_video", "reference_audio"], ["image_url", "video_url", "audio_url"]),
     }),
     S("resolution", T("分辨率（h3：768P/2K；h3-max：480P/768P）", "Resolution (h3: 768P/2K; h3-max: 480P/768P)"), { required: true }),
@@ -1044,7 +1296,10 @@ const MINIMAX_V2: FamilySpec = {
     if (textOnly && (!has(body, "ratio") || body["ratio"] === "adaptive")) {
       return t("gen.rule.minimaxV2.ratio");
     }
-    return undefined;
+    // h3-max 支持多模态参考素材（与 h3 同权）：调用指南口径正确，TokenPlan 表格 9-23「不支持」为错误声明——
+    // 2026-11-04 实测：h3-max + reference_image 提交通过且出片成功（300000 tokens），勿再按表格加模型级拦截。
+    // text 块长度（与族 maxPromptChars 同口径，checkBody 顶层键检查不覆盖数组内块）
+    return contentTextLengthCheck(2000)(body);
   },
   taskIdOf: (resp) => firstStr(resp, "task_id"),
   query: (_m, id) => ({ method: "GET", path: `/v1/wand/minimax-video-v2/tasks/${encodeURIComponent(id)}` }),
@@ -1056,14 +1311,24 @@ const MINIMAX_V2: FamilySpec = {
 
 const WAND_VIDEO: FamilySpec = {
   id: "wand-video",
-  maxPromptChars: 2000,
+  // 文档矛盾待反馈：WAND 概览 2000 vs 调用指南 8192；本地取宽值 8192 防误拦
+  maxPromptChars: 8192,
   kind: "video",
   models: ["wand-vega-video-1.0-lite"],
   sync: false,
   params: [
-    A("content", T("多模态输入（至少 1 个 text 块；素材仅公网 URL）", "Multimodal input (at least one text block; materials public URL only)"), {
+    A("content", T("多模态输入（至少 1 个 text 块；图片与音频可传本地文件，自动内联为 data URL（音频须 2~15 秒）；视频素材仅公网 URL）", "Multimodal input (at least one text block; images and audio may be local files, inlined as data URLs (audio 2~15 s); video materials public URL only)"), {
       required: true,
-      media: IMG("urlOnly", ["image_url.url", "video_url.url", "audio_url.url"]),
+      // 实测（2026-11-03）：image_url / audio_url 的 data URL 上游接受——image_url 出片成功；
+      // audio_url 被解码并校验时长（须 2000~15000 ms，实测 1 秒音频报 InvalidParameter，格式本身放行）。
+      // video_url 上游明确拒绝内联（400: "video_url does not support inline base64; use a public URL"），维持仅公网 URL。
+      // 裸 Base64（无 data: 前缀）提交即 400（scheme "" is not supported, allowed: http/https/asset）——
+      // 该 allowed 列表不含 data，系报错文案滞后，以实测为准。
+      media: [
+        IMG("dataUrl", ["image_url.url"]),
+        IMG("urlOnly", ["video_url.url"]),
+        MEDIA("dataUrl", ["audio_url.url"], { formats: ["wav", "mp3"], maxBytes: 15_000_000 }),
+      ],
       fields: CONTENT_FIELDS(
         ["text", "image_url", "video_url", "audio_url"],
         ["first_frame", "last_frame", "reference_image", "reference_video", "reference_audio"],
@@ -1080,6 +1345,8 @@ const WAND_VIDEO: FamilySpec = {
     ]),
   ],
   doc: "https://cloud.tencent.com/document/product/1823/138195",
+  // content 内 text 块长度：文档矛盾（概览 2000 / 指南 8192），取宽值防误拦
+  validateBody: contentTextLengthCheck(8192),
   taskIdOf: (resp) => firstStr(resp, "id", "task_id"),
   query: (_m, id) => ({ method: "GET", path: `/v1/wand/vega-videos/tasks/${encodeURIComponent(id)}` }),
   parse: (resp) => {
@@ -1131,6 +1398,8 @@ const HY_3D: FamilySpec = {
     if (has(body, "image_url") && has(body, "image_base64")) return t("gen.rule.hy3d.onlyOneImage");
     if (!hasImage && !has(body, "prompt")) return t("gen.rule.hy3d.needInput");
     if (body["generate_type"] === "LowPoly" && str(body["model"]) === "hy-3d-3.1") return t("gen.rule.hy3d.noLowPoly");
+    // pro（3.0/3.1）result_format 仅 STL/USDZ/FBX（obj/glb 为默认返回格式，MP4 仅 express 支持）
+    if (body["result_format"] === "MP4" && str(body["model"]) !== "hy-3d-express") return t("gen.rule.hy3d.resultFormat");
     if (hasImage && has(body, "prompt") && body["generate_type"] !== "Sketch") {
       return t("gen.rule.hy3d.promptImageExclusive");
     }
@@ -1150,7 +1419,7 @@ const WORLD2_PANORAMA: FamilySpec = {
   sync: true,
   params: [
     PROMPT(T("场景文本描述（≤600 字符）", "Scene description (<=600 chars)")),
-    A("images", T("参考图（公网 URL，≥512×512、单张 ≤10M）", "Reference images (public URL, >=512x512, each <=10M)"), { media: IMG("urlOnly") }),
+    S("image_url", T("参考图（公网 URL，≥512×512、≤10M）", "Reference image (public URL, >=512x512, <=10M)"), { media: IMG("urlOnly") }),
   ],
   doc: "https://cloud.tencent.com/document/product/1823/136578",
   parse: (resp) => {
@@ -1280,8 +1549,8 @@ const ASR: FamilySpec = {
 const ASR_SOURCE = S("source", T("识别语种（缺省自动检测）", "Source language (auto-detected if absent)"));
 
 const ASR_SYNC_PARAMS: ParamSpec[] = [
-  S("input_url", T("音视频文件公网 URL（与 data 二选一）", "Audio/video public URL (either this or data)"), { media: MEDIA("urlOnly") }),
-  S("data", T("音频 Base64（可传本地文件；与 input_url 二选一）", "Audio Base64 (local file allowed; either this or input_url)"), { media: MEDIA("raw") }),
+  S("input_url", T("音视频文件公网 URL（≤100MB / ≤30 分钟；与 data 二选一）", "Audio/video public URL (<=100MB / <=30min; either this or data)"), { media: MEDIA("urlOnly") }),
+  S("data", T("音频 Base64（可传本地文件，≤75MB；与 input_url 二选一）", "Audio Base64 (local file allowed, <=75MB; either this or input_url)"), { media: MEDIA("raw", undefined, { maxBytes: 75_000_000 }) }),
   ASR_SOURCE,
   S("voice_encode_format", T("音频编码（如 pcm/wav/mp3，缺省 auto）", "Audio encoding (e.g. pcm/wav/mp3, default auto)")),
 ];
@@ -1307,7 +1576,7 @@ const TTS: FamilySpec = {
       F("speed", "number", T("语速", "Speed"), { min: 0.5, max: 2 }),
       F("vol", "number", T("音量", "Volume"), { min: 0, max: 10 }),
       F("pitch", "integer", T("音调", "Pitch"), { min: -12, max: 12 }),
-      F("emotion", "string", T("情感", "Emotion"), { choices: ["happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm", "fluent", "whisper"] }),
+      F("emotion", "string", T("情感（2.8-hd / 2.8-turbo 不支持 whisper）", "Emotion (whisper is unsupported on 2.8-hd / 2.8-turbo)"), { choices: ["happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm", "fluent", "whisper"] }),
       F("text_normalization", "boolean", T("数字 / 符号标准化", "Number/symbol normalization")),
       F("latex_read", "boolean", T("LaTeX 朗读", "Read LaTeX")),
     ], { required: true }),
@@ -1363,6 +1632,7 @@ const VOICE_CLONE: FamilySpec = {
     S("audio_data", T("待复刻音频 Base64（可传本地文件：mp3/m4a/wav，≤20MB；与 audio_url 二选一）", "Source audio Base64 (local file allowed: mp3/m4a/wav, <=20MB; either this or audio_url)"), {
       media: MEDIA("raw", undefined, { formats: ["mp3", "m4a", "wav"], maxBytes: 20_000_000 }),
     }),
+    N("file_id", T("已上传复刻音频的文件 ID（与 audio_url / audio_data 三选一）", "Uploaded source-audio file ID (one of audio_url / audio_data / file_id)")),
     S("tts_model", T("试听用的语音合成模型（minimax-speech-*）", "Preview TTS model (minimax-speech-*)")),
     S("voice_id", T("自定义音色 ID（不传自动生成）", "Custom voice ID (auto-generated if absent)")),
     S("text", T("试听文本（≤1000 字符）", "Preview text (<=1000 chars)")),
@@ -1371,7 +1641,10 @@ const VOICE_CLONE: FamilySpec = {
     S("output_format", T("试听音频返回形式", "Preview audio form"), { choices: ["hex", "url"], default: "url" }),
   ],
   doc: "https://cloud.tencent.com/document/product/1823/135798",
-  validateBody: (body) => exactlyOne(body, ["audio_url", "audio_data"], "voice clone"),
+  validateBody: (body) =>
+    ["audio_url", "audio_data", "file_id"].every((k) => !has(body, k))
+      ? t("gen.check.needOne", { what: "voice clone", flags: "--audio-url / --audio-data / --file-id" })
+      : undefined,
   parse: (resp) => {
     const envError = minimaxErrorOf(resp);
     if (envError) return { state: "failed", urls: [], extraUrls: [], error: envError };
@@ -1458,6 +1731,8 @@ const MINIMAX_MUSIC: FamilySpec = {
     if (body["is_instrumental"] === true) return has(body, "prompt") ? undefined : t("gen.rule.minimaxMusic.instrumental");
     if (body["lyrics_optimizer"] === true) return has(body, "prompt") ? undefined : t("gen.rule.minimaxMusic.optimizer");
     if (!has(body, "lyrics")) return t("gen.rule.minimaxMusic.needLyrics");
+    const len = [...(str(body["lyrics"]) ?? "")].length;
+    if (len > MINIMAX_MUSIC_LYRICS_MAX) return t("gen.rule.minimaxMusic.lyricsTooLong", { len, max: MINIMAX_MUSIC_LYRICS_MAX });
     return undefined;
   },
   parse: (resp) => {
@@ -1472,6 +1747,9 @@ const MINIMAX_MUSIC: FamilySpec = {
 
 /** Mureka 歌词上限 */
 const MUREKA_LYRICS_MAX = 5000;
+
+/** MiniMax 音乐歌词上限 */
+const MINIMAX_MUSIC_LYRICS_MAX = 3500;
 
 /**
  * 音乐生成 Mureka（同步）：目前只支持歌词成曲，--lyrics 必填。
@@ -1488,7 +1766,6 @@ const MUREKA_MUSIC: FamilySpec = {
     S("lyrics", T("歌词（≤5000 字符，可用 [Verse]/[Chorus] 等分段标签）", "Lyrics (<=5000 chars, section tags like [Verse]/[Chorus])"), { required: true }),
     S("prompt", T("风格提示词（≤1024 字符，如 pop, emotional, female vocal）", "Style prompt (<=1024 chars, e.g. pop, emotional, female vocal)")),
     S("gender", T("人声性别倾向", "Vocal gender"), { choices: ["female", "male"] }),
-    A("styles", T("风格枚举（pop/rock/jazz/r&b/edm/ambient/folk/latin/k-pop/j-pop/house/gospel/lo-fi）", "Style enums (pop/rock/jazz/r&b/edm/ambient/folk/latin/k-pop/j-pop/house/gospel/lo-fi)")),
     N("n", T("生成数量 [1, 3]（默认 2，按量计费）", "Track count [1, 3] (default 2, billed per track)")),
   ],
   doc: "https://cloud.tencent.com/document/product/1823/138805",
@@ -1862,7 +2139,7 @@ export const APIS: ApiRef[] = [
   apiRefOf({ id: "wand/hunyuan-video/generation", family: HY_VIDEO }),
   apiRefOf({ id: "wand/kling/text-to-video", family: KLING_VIDEO, apiName: "text-to-video" }),
   apiRefOf({ id: "wand/kling/image-to-video", family: KLING_VIDEO, apiName: "image-to-video" }),
-  apiRefOf({ id: "wand/kling/omni-video", family: KLING_VIDEO_OMNI }),
+  apiRefOf({ id: "wand/kling/omni-video", family: KLING_VIDEO_OMNI, models: ["kling-video-v4", "kling-video-v3-omni", "kling-video-o1"] }),
   apiRefOf({ id: "wand/kling/motion-control", family: KLING_MOTION_CONTROL }),
   apiRefOf({ id: "wand/vidu/text-to-video", family: VIDU_VIDEO, apiName: "text-to-video" }),
   apiRefOf({ id: "wand/vidu/image-to-video", family: VIDU_VIDEO, apiName: "image-to-video" }),
@@ -1923,6 +2200,15 @@ export function checkBody(api: ApiRef, body: Obj): string | undefined {
   for (const p of api.params) {
     if (has(body, p.path) && p.models && !p.models.includes(model)) {
       return t("gen.check.modelOnly", { flag: p.flag, models: p.models.join(" / "), model });
+    }
+    // object 参数的子字段级模型限定（如 settings.audio 仅 V3 / V2.6）
+    const obj = body[p.path];
+    if (p.kind === "object" && p.fields && obj && typeof obj === "object" && !Array.isArray(obj)) {
+      for (const f of p.fields) {
+        if (f.models && has(obj as Obj, f.key) && !f.models.includes(model)) {
+          return t("gen.check.modelOnly", { flag: `${p.flag}.${f.key}`, models: f.models.join(" / "), model });
+        }
+      }
     }
   }
   for (const p of api.params) {

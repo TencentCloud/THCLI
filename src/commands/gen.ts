@@ -403,8 +403,12 @@ function encodeMediaValue(family: FamilySpec, p: ParamSpec, media: MediaSpec, va
     throw new Error(t("gen.fieldUrlOnly", { flag: `--${p.flag}`, name: path.basename(file) }));
   }
   const ext = path.extname(file).toLowerCase();
+  // auto：图片或视频均可，按扩展名分派（图片走族 formats/sizeLimit，音视频走字段 formats/maxBytes）
+  const kind = media.type === "auto"
+    ? (IMAGE_MIME[ext] ? "image" : AUDIO_MIME[ext] || VIDEO_MIME[ext] ? "media" : "unknown")
+    : media.type;
   let mime: string | undefined;
-  if (media.type === "image") {
+  if (kind === "image") {
     if (VIDEO_MIME[ext]) throw new Error(t("gen.fieldUrlOnly", { flag: `--${p.flag}`, name: path.basename(file) }));
     mime = IMAGE_MIME[ext];
     if (!mime) throw new Error(t("gen.imageBadFormat", { model: family.id, mime: ext || "?", formats: (family.formats ?? []).join("/") }));
@@ -416,7 +420,7 @@ function encodeMediaValue(family: FamilySpec, p: ParamSpec, media: MediaSpec, va
     if (size > limit) {
       throw new Error(t("gen.imageTooLarge", { model: family.id, name: path.basename(file), size: mb(size), limit: mb(limit) }));
     }
-  } else {
+  } else if (kind === "media") {
     mime = AUDIO_MIME[ext] ?? VIDEO_MIME[ext];
     if (!mime) throw new Error(t("gen.inputBadFile", { name: path.basename(file) }));
     // 字段级约束（如音色复刻只收 mp3/m4a/wav ≤20MB）：发出去才被拒会白等一次上传
@@ -427,6 +431,8 @@ function encodeMediaValue(family: FamilySpec, p: ParamSpec, media: MediaSpec, va
     if (media.maxBytes !== undefined && size > media.maxBytes) {
       throw new Error(t("gen.mediaTooLarge", { flag: `--${p.flag}`, name: path.basename(file), size: mb(size), limit: mb(media.maxBytes) }));
     }
+  } else {
+    throw new Error(t("gen.inputBadFile", { name: path.basename(file) }));
   }
   const b64 = fs.readFileSync(file).toString("base64");
   return media.encoding === "raw" ? b64 : `data:${mime};base64,${b64}`;

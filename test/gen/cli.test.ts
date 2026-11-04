@@ -26,6 +26,8 @@ function run(args: string[]): { out: string; code: number } {
       env: { ...process.env, THCLI_LANG: "en" },
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 60_000,
+      // 本地视频 dataUrl 编码后请求体可达数 MB（如 2.3MB mp4 → ~3MB base64），默认 1MB 会截断误报
+      maxBuffer: 32 * 1024 * 1024,
     });
     return { out, code: 0 };
   } catch (err) {
@@ -60,6 +62,9 @@ describe("+gen 接口字段 flag（--dry-run）", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "thcli-gen-"));
   const png = path.join(dir, "a.png");
   fs.writeFileSync(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  // 真实 mp4 资产（vidu subjects[].videos 的 dataUrl 媒体编码用）
+  const mp4 = path.join(process.cwd(), "test", "assets", "videos", "dance-8s.mp4");
+  const mp3 = path.join(process.cwd(), "test", "assets", "audio", "commons-en-speech.mp3");
 
   it("flag 名即字段名：--prompt --size --sequential-image-generation 直接进请求体", () => {
     const b = body(["wand/si-image/generation", "--model", "seedream-image-v5.0-lite", "--prompt", "cat", "--size", "2K", "--sequential-image-generation", "auto", "--watermark", "true"]);
@@ -73,9 +78,29 @@ describe("+gen 接口字段 flag（--dry-run）", () => {
     assert.match(images[1]!, /^data:image\/png;base64,/);
     assert.deepEqual(b["optimize_prompt_options"], { mode: "fast" });
 
-    const k = body(["wand/kling/image-to-video", "--model", "kling-video-v3", "--contents", `[{"type":"first_frame","url":"${png}"}]`]);
-    const url = (k["contents"] as Array<{ url: string }>)[0]!.url;
-    assert.ok(!url.startsWith("data:") && url.length > 0, "Kling 收裸 Base64");
+    const k = body(["wand/kling/image-to-video", "--model", "kling-video-v3", "--contents", `[{"type":"prompt","text":"cat"},{"type":"first_frame","url":"${png}"}]`]);
+    const url = (k["contents"] as Array<{ url: string }>)[1]!.url;
+    assert.match(url, /^data:image\/png;base64,/, "Kling 收 data URL");
+
+    // vega：image_url / audio_url 本地文件编码为 data URL（实测上游接受内联；audio 时长须 2~15s）；
+    // video_url 上游明确拒绝内联 base64（实测 400），仅公网 URL
+    const v = body(["wand/vega-videos/tasks", "--content", `[{"type":"text","text":"cat"},{"type":"image_url","image_url":{"url":"${png}"},"role":"first_frame"}]`]);
+    assert.match((v["content"] as Array<{ image_url: { url: string } }>)[1]!.image_url.url, /^data:image\/png;base64,/);
+    const v2 = body(["wand/vega-videos/tasks", "--content", `[{"type":"text","text":"cat"},{"type":"audio_url","audio_url":{"url":"${mp3}"},"role":"reference_audio"}]`]);
+    assert.match((v2["content"] as Array<{ audio_url: { url: string } }>)[1]!.audio_url.url, /^data:audio\/mpeg;base64,/);
+
+    // ASR 同步 data：本地文件 → 裸 Base64（无 data: 前缀）
+    const a = body(["wand/asrproxy/sync_transcribe", "--model", "hy-asr-3.0-preview", "--data", mp3]);
+    assert.ok(!String(a["data"]).startsWith("data:") && String(a["data"]).length > 100, "ASR data 裸 Base64");
+
+    // Seedream：tiff / heic / heif 本地文件编码（IMAGE_MIME 补齐前会被误拒为不支持格式）
+    for (const [ext, mime] of [["tiff", "image/tiff"], ["heic", "image/heic"], ["heif", "image/heif"]] as const) {
+      const f = path.join(os.tmpdir(), `thcli-mime.${ext}`);
+      fs.writeFileSync(f, Buffer.from([0, 1, 2, 3]));
+      const s = body(["wand/si-image/generation", "--model", "seedream-image-v5.0-pro", "--prompt", "p", "--images", f]);
+      assert.ok((s["images"] as string[])[0]!.startsWith(`data:${mime};base64,`), `${ext} → ${mime}`);
+      fs.rmSync(f);
+    }
   });
 
   it("单接口模型可省略 --model；--param 补充未收录字段（= 字符串、:= JSON）", () => {
@@ -129,7 +154,8 @@ describe("+gen 接口字段 flag（--dry-run）", () => {
   });
 
   it("本地校验：只收 URL 的字段拒本地文件；模型不支持的字段报错；必填缺失报错", () => {
-    assert.match(run(["wand/vega-videos/tasks", "--content", `[{"type":"image_url","image_url":{"url":"${png}"}}]`]).out, /only accepts public URLs/);
+    // vega video_url 仅公网 URL（上游实测拒绝内联 base64）：本地 mp4 直接拦截
+    assert.match(run(["wand/vega-videos/tasks", "--content", `[{"type":"video_url","video_url":{"url":"${mp4}"}}]`]).out, /only accepts public URLs/);
     assert.match(run(["wand/si-image/generation", "--model", "seedream-image-v5.0-pro", "--prompt", "x", "--tools", '{"type":"web_search"}']).out, /only supported by seedream-image-v5.0-lite/);
     assert.match(run(["wand/minimax-tts/sync_tts", "--model", "minimax-speech-2.8-hd", "--text", "hi"]).out, /--voice-setting is required/);
   });
@@ -146,6 +172,13 @@ describe("+gen 接口字段 flag（--dry-run）", () => {
       run(["wand/hunyuan-video/world2-scene", "--prompt", "x", "--image-url", "/nonexistent/a.png"]).out,
       /only accepts a public URL/,
     );
+    // panorama 参考图改名 image_url（TokenPlan 最终版 9-23）：本地拦截、URL 直传
+    assert.match(
+      run(["wand/hunyuan-image/world2-panorama", "--prompt", "x", "--image-url", "/nonexistent/a.png"]).out,
+      /only accepts a public URL/,
+    );
+    const pano = body(["wand/hunyuan-image/world2-panorama", "--prompt", "x", "--image-url", "https://example.com/a.jpg"]);
+    assert.equal(pano["image_url"], "https://example.com/a.jpg");
   });
 
   it("本地校验：混元生图 --size 格式/宽高/面积（v3 与 v3.5 约束不同；--param 旁路也拦）", () => {
@@ -177,17 +210,15 @@ describe("+gen 接口字段 flag（--dry-run）", () => {
     );
   });
 
-  it("本地校验：嵌套 urlOnly 子路径（vidu subjects[].videos）拒本地文件与不存在路径", () => {
-    // 存在的本地文件 → urlOnly 拦截（subjects[].videos 仅公网 URL）
+  it("本地校验：嵌套媒体子路径（vidu subjects[].videos，dataUrl 编码，mp4/avi/mov ≤20MB）", () => {
+    // 存在的本地文件但不在音视频格式白名单 → 拦截
     assert.match(
       run(["wand/vidu/reference-to-video", "--model", "vidu-video-q2-pro", "--prompt", "@a dancing", "--subjects", `[{"name":"a","videos":["${png}"]}]`]).out,
-      /only accepts public URLs, not local files/,
+      /not a supported audio\/video format/,
     );
-    // 不存在的路径 → 非 URL 形态拦截
-    assert.match(
-      run(["wand/vidu/reference-to-video", "--model", "vidu-video-q2-pro", "--prompt", "@a dancing", "--subjects", '[{"name":"a","videos":["assets/videos/nope.mp4"]}]']).out,
-      /only accepts a public URL/,
-    );
+    // 本地 mp4 → data URL 编码（URL 生成不走网络，dry-run 只编码请求体）
+    const local = body(["wand/vidu/reference-to-video", "--model", "vidu-video-q2-pro", "--prompt", "@a dancing", "--subjects", `[{"name":"a","videos":["${mp4}"]}]`]);
+    assert.match((local["subjects"] as Array<{ videos: string[] }>)[0]!.videos[0]!, /^data:video\/mp4;base64,/);
     // subjects[].images 仍可传本地文件（dataUrl 编码），且 videos 传 URL 正常放行
     const b = body(["wand/vidu/reference-to-video", "--model", "vidu-video-q2-pro", "--prompt", "@a dancing", "--subjects", `[{"name":"a","images":["${png}"],"videos":["https://x/dance.mp4"]}]`]);
     const s = (b["subjects"] as Array<{ images: string[]; videos: string[] }>)[0]!;
