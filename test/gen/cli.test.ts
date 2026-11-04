@@ -82,8 +82,8 @@ describe("+gen 接口字段 flag（--dry-run）", () => {
     const url = (k["contents"] as Array<{ url: string }>)[1]!.url;
     assert.match(url, /^data:image\/png;base64,/, "Kling 收 data URL");
 
-    // vega：image_url / audio_url 本地文件编码为 data URL（实测上游接受内联；audio 时长须 2~15s）；
-    // video_url 上游明确拒绝内联 base64（实测 400），仅公网 URL
+    // vega：image_url / audio_url 本地文件编码为 data URL（audio 时长须 2~15s）；
+    // video_url 仅公网 URL（拒绝内联 base64）
     const v = body(["wand/vega-videos/tasks", "--content", `[{"type":"text","text":"cat"},{"type":"image_url","image_url":{"url":"${png}"},"role":"first_frame"}]`]);
     assert.match((v["content"] as Array<{ image_url: { url: string } }>)[1]!.image_url.url, /^data:image\/png;base64,/);
     const v2 = body(["wand/vega-videos/tasks", "--content", `[{"type":"text","text":"cat"},{"type":"audio_url","audio_url":{"url":"${mp3}"},"role":"reference_audio"}]`]);
@@ -119,7 +119,7 @@ describe("+gen 接口字段 flag（--dry-run）", () => {
   });
 
   it("注册表默认值：flag 未传时写入请求体，4 个 minimax 音频接口 output_format 均默认 url；显式 flag / --param / --body 可覆盖", () => {
-    // 缺陷回归：默认不传时上游走 hex/base64，长文本（1320 字实测）响应体超限被拒 502 502001。
+    // 缺陷回归：默认不传时上游走 hex/base64，长文本响应体超限被拒 502 502001。
     // 机制只测一个接口不够——4 个 default 是独立手写数据，任何一个漏写都要能发现
     const cases: Array<[string, string[]]> = [
       ["wand/minimax-tts/sync_tts", ["--model", "minimax-speech-2.8-hd", "--text", "hi", "--voice-setting", '{"voice_id":"male-qn-qingse"}']],
@@ -215,7 +215,7 @@ describe("+gen 接口字段 flag（--dry-run）", () => {
   });
 
   it("本地校验：只收 URL 的字段拒本地文件；模型不支持的字段报错；必填缺失报错", () => {
-    // vega video_url 仅公网 URL（上游实测拒绝内联 base64）：本地 mp4 直接拦截
+    // vega video_url 仅公网 URL（拒绝内联 base64）：本地 mp4 直接拦截
     assert.match(run(["wand/vega-videos/tasks", "--content", `[{"type":"video_url","video_url":{"url":"${mp4}"}}]`]).out, /only accepts public URLs/);
     assert.match(run(["wand/si-image/generation", "--model", "seedream-image-v5.0-pro", "--prompt", "x", "--tools", '{"type":"web_search"}']).out, /only supported by seedream-image-v5.0-lite/);
     assert.match(run(["wand/minimax-tts/sync_tts", "--model", "minimax-speech-2.8-hd", "--text", "hi"]).out, /--voice-setting is required/);

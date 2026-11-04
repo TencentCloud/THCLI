@@ -194,7 +194,7 @@ describe("报错时附 doctor 诊断命令", () => {
     assert.ok(!none.some((l) => l.includes("thcli doctor model --id")), "不传 diagnose 时不附（+chat）");
   });
 
-  it("401006 的修复建议包含 Key 范围不含模型这一原因（实测网关对范围外模型返回 401006 而非 403002）", () => {
+  it("401006 的修复建议包含 Key 范围不含模型这一原因（网关对范围外模型返回 401006 而非 403002）", () => {
     assert.match(lookupError("401006")!.fix, /key scope/);
     assert.match(lookupError("401002")!.fix, /key enable/);
   });

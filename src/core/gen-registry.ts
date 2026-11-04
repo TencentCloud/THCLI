@@ -234,7 +234,7 @@ function result(state: TaskState, urls: string[], resp: unknown, extraUrls: stri
 
 /**
  * 解析提交 / 查询响应，并兜底平台错误信封。
- * 网关有时回 HTTP 200 但响应体是 {"error":{"code":"server_error","message":"ok"}}（实测：Kling 生图查询），
+ * 网关有时回 HTTP 200 但响应体是 {"error":{"code":"server_error","message":"ok"}}（如 Kling 生图查询），
  * 族的 parse 找不到状态字段会按 running 处理，导致一直轮询到超时、任务列表永远显示 running。
  * 解析结果未到终态、且带非空错误信封时，按失败处理。
  */
@@ -856,13 +856,13 @@ const KLING_VIDEO_OMNI: FamilySpec = {
   sizeLimit: 50_000_000,
   formats: ["jpeg", "png"],
   params: [
-    A("contents", T("多模态参考素材集合（V3-Omni / O1：图片 / 视频 url 均可为本地文件，图片 jpg/jpeg/png ≤50MB，视频 mp4/mov ≤75MB；v4：视频仅 URL（≤300MB、3~30 秒），图片 ≤30MB ≤10 张，参考视频 ≤5 段，主体 ≤7，音色 ≤3，素材合计 ≤15，可在 prompt 中以 @image_1 / @video_1 / @element_1 引用）", "Multimodal reference blocks (V3-Omni / O1: image / video url may be local files, image jpg/jpeg/png <=50MB, video mp4/mov <=75MB; v4: video URL only (<=300MB, 3~30 s), images <=30MB and <=10, videos <=5, elements <=7, voices <=3, <=15 in total; reference as @image_1 / @video_1 / @element_1)"), {
+    A("contents", T("多模态参考素材集合（V3-Omni / O1：图片 / 视频 url 均可为本地文件，图片 jpg/jpeg/png ≤50MB，视频 mp4/mov ≤75MB；v4：视频 URL ≤300MB / 本地 mp4/mov ≤75MB，图片 ≤30MB ≤10 张，参考视频 ≤5 段，主体 ≤7，音色 ≤3，素材合计 ≤15，可在 prompt 中以 @image_1 / @video_1 / @element_1 引用）", "Multimodal reference blocks (V3-Omni / O1: image / video url may be local files, image jpg/jpeg/png <=50MB, video mp4/mov <=75MB; v4: video URL <=300MB or local mp4/mov <=75MB, images <=30MB and <=10, videos <=5, elements <=7, voices <=3, <=15 in total; reference as @image_1 / @video_1 / @element_1)"), {
       required: true,
       media: AUTO("dataUrl", ["url"], { formats: ["mp4", "mov"], maxBytes: 75_000_000 }),
       fields: KLING_CONTENT_FIELDS(
         ["prompt", "first_frame", "last_frame", "refer_image", "feature_video", "base_video", "element", "voice"],
         [F("voice_id", "string", T("音色 ID（type=voice，需同时给 id，prompt 中以 @id 引用）", "Voice ID (type=voice; id required too, referenced as @id)"))],
-        T("图片 / 视频素材（V3-Omni / O1 均可为本地文件；v4 视频仅 URL（≤300MB），图片本地 ≤30MB）", "Image / video material (V3-Omni / O1: local files allowed; v4: video URL only (<=300MB), local images <=30MB)"),
+        T("图片 / 视频素材（V3-Omni / O1 / v4 均可为本地文件，视频 mp4/mov ≤75MB；v4 URL 视频 ≤300MB，图片本地 ≤30MB）", "Image / video material (V3-Omni / O1 / v4: local files allowed, video mp4/mov <=75MB; v4 URL video <=300MB, local images <=30MB)"),
       ),
     }),
     O("settings", T("输出配置（V3-Omni / O1 无首帧时 aspect_ratio 必填，含参考视频场景；v4 仅 resolution / aspect_ratio / duration）", "Output settings (V3-Omni / O1: aspect_ratio required without a first frame, reference videos included; v4: resolution / aspect_ratio / duration only)"), [
@@ -896,9 +896,9 @@ const KLING_VIDEO_OMNI: FamilySpec = {
     const voices = countOf(types, "voice");
 
     if (model === KV4) {
-      // v4：不支持 base_video（已在类型白名单拦）与 settings.audio；视频仅 URL；数量上限
+      // v4：不支持 base_video（已在类型白名单拦）与 settings.audio；数量上限。
+      // 视频素材：URL 或本地文件（mp4/mov ≤75MB，走 AUTO 规则编码为 data URL）；URL 大小由服务端校验
       if (has(s, "audio")) return t("gen.rule.omni.v4NoAudio");
-      if (blocks.some((b) => b["type"] === "feature_video" && !isUrl(b["url"]))) return t("gen.rule.kling.v4VideoUrlOnly");
       // v4 图片单张 ≤30MB（调用指南；族级 sizeLimit 50MB 不适用）：本地文件已被编码为 data URL，
       // 按 Base64 载荷长度估算原始字节（误差 ≤2B）；远程 URL 大小属内容属性，由服务端校验
       if (blocks.some((b) => {
@@ -916,9 +916,7 @@ const KLING_VIDEO_OMNI: FamilySpec = {
       return undefined;
     }
 
-    // V3-Omni / O1
-    // 服务端实测：只有传了首帧才能省略 aspect_ratio（画幅跟随首帧）；feature_video 参考、base_video 编辑都要求传，
-    // 官方文档写的「无首帧且无参考视频时必填」与服务端不一致，以服务端为准
+    // V3-Omni / O1：aspect_ratio 仅在有首帧时可省（画幅跟随首帧）；feature_video 参考、base_video 编辑都必填
     if (!types.includes("first_frame") && !has(s, "aspect_ratio")) {
       const video = types.find((x) => x === "feature_video" || x === "base_video");
       return video ? t("gen.rule.omni.ratioWithVideo", { video }) : t("gen.rule.omni.ratioNoFirstFrame");
@@ -1305,8 +1303,6 @@ const MINIMAX_V2: FamilySpec = {
     if (textOnly && (!has(body, "ratio") || body["ratio"] === "adaptive")) {
       return t("gen.rule.minimaxV2.ratio");
     }
-    // h3-max 支持多模态参考素材（与 h3 同权）：调用指南口径正确，TokenPlan 表格 9-23「不支持」为错误声明——
-    // 2026-11-04 实测：h3-max + reference_image 提交通过且出片成功（300000 tokens），勿再按表格加模型级拦截。
     // text 块长度（与族 maxPromptChars 同口径，checkBody 顶层键检查不覆盖数组内块）
     return contentTextLengthCheck(2000)(body);
   },
@@ -1320,7 +1316,7 @@ const MINIMAX_V2: FamilySpec = {
 
 const WAND_VIDEO: FamilySpec = {
   id: "wand-video",
-  // 文档矛盾待反馈：WAND 概览 2000 vs 调用指南 8192；本地取宽值 8192 防误拦
+  // 提示词上限 8192（调用指南口径）
   maxPromptChars: 8192,
   kind: "video",
   models: ["wand-vega-video-1.0-lite"],
@@ -1328,11 +1324,8 @@ const WAND_VIDEO: FamilySpec = {
   params: [
     A("content", T("多模态输入（至少 1 个 text 块；图片与音频可传本地文件，自动内联为 data URL（音频须 2~15 秒）；视频素材仅公网 URL）", "Multimodal input (at least one text block; images and audio may be local files, inlined as data URLs (audio 2~15 s); video materials public URL only)"), {
       required: true,
-      // 实测（2026-11-03）：image_url / audio_url 的 data URL 上游接受——image_url 出片成功；
-      // audio_url 被解码并校验时长（须 2000~15000 ms，实测 1 秒音频报 InvalidParameter，格式本身放行）。
-      // video_url 上游明确拒绝内联（400: "video_url does not support inline base64; use a public URL"），维持仅公网 URL。
-      // 裸 Base64（无 data: 前缀）提交即 400（scheme "" is not supported, allowed: http/https/asset）——
-      // 该 allowed 列表不含 data，系报错文案滞后，以实测为准。
+      // 上游行为：image_url / audio_url 支持 data URL 内联（音频须 2000~15000 ms，否则 InvalidParameter）；
+      // video_url 仅公网 URL（内联报 400）；裸 Base64（无 data: 前缀）报 400（scheme not supported）。
       media: [
         IMG("dataUrl", ["image_url.url"]),
         IMG("urlOnly", ["video_url.url"]),
@@ -1354,7 +1347,7 @@ const WAND_VIDEO: FamilySpec = {
     ]),
   ],
   doc: "https://cloud.tencent.com/document/product/1823/138195",
-  // content 内 text 块长度：文档矛盾（概览 2000 / 指南 8192），取宽值防误拦
+  // content 内 text 块长度（调用指南口径 8192）
   validateBody: contentTextLengthCheck(8192),
   taskIdOf: (resp) => firstStr(resp, "id", "task_id"),
   query: (_m, id) => ({ method: "GET", path: `/v1/wand/vega-videos/tasks/${encodeURIComponent(id)}` }),

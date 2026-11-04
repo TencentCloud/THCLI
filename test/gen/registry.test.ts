@@ -205,7 +205,7 @@ describe("请求体校验（适用模型 / 必填 / 互斥）", () => {
     bad("wand/pixverse/text-to-video", { model: "pixverse-video-c1", prompt: "p", duration: 5, quality: "720p", generate_multi_clip_switch: true }, /only supported by pixverse-video-v6.0/);
     // v3-turbo 图生视频允许尾帧（TokenPlan 最终版 9-23：type=first_frame/last_frame，1~2 张）
     ok("wand/kling/image-to-video", { model: "kling-video-v3-turbo", contents: [{ type: "prompt", text: "p" }, { type: "first_frame", url: "u" }, { type: "last_frame", url: "v" }], settings: { resolution: "1080p", duration: 5 } });
-    // h3-max 支持多模态参考（与 h3 同权）：调用指南口径，2026-11-04 实测 reference_image 出片成功；TokenPlan 表格 9-23「不支持」为错误声明
+    // h3-max 支持多模态参考（与 h3 同权，调用指南口径）
     ok("wand/minimax-video-v2/generation", { model: "minimax-video-h3-max", content: [{ type: "text", text: "p" }, { type: "image_url", image_url: { url: "u" }, role: "reference_image" }], resolution: "768P", duration: 6, ratio: "16:9" });
     ok("wand/minimax-video-v2/generation", { model: "minimax-video-h3-max", content: [{ type: "text", text: "p" }, { type: "image_url", image_url: { url: "u" }, role: "first_frame" }], resolution: "768P", duration: 6, ratio: "16:9" });
     // subjects[].videos 仅 q2-pro：其他模型本地先拦
@@ -255,7 +255,7 @@ describe("请求体校验（适用模型 / 必填 / 互斥）", () => {
     assert.throws(() => parseParamValue(param(H, "ratio"), "5:4"), /must be one of/);
   });
 
-  it("content 内 text 块长度：H3 拦 2000；WAND 文档矛盾（概览 2000 / 指南 8192）取宽值 8192，2000~8192 不误拦", () => {
+  it("content 内 text 块长度：H3 拦 2000；WAND 拦 8192（调用指南口径），2000~8192 放行", () => {
     const H = "wand/minimax-video-v2/generation";
     const hb = { model: "minimax-video-h3", resolution: "768P", duration: 6, ratio: "16:9" };
     const long = "a".repeat(2001);
@@ -329,7 +329,7 @@ describe("请求体校验（适用模型 / 必填 / 互斥）", () => {
   it("Kling：omni 无首帧需 settings.aspect_ratio；o1 无参考图仅 5/10 秒；motion 须有 image 与 video 块", () => {
     bad("wand/kling/omni-video", { model: "kling-video-v3-omni", contents: [{ type: "prompt", text: "p" }] }, /aspect_ratio/);
     ok("wand/kling/omni-video", { model: "kling-video-v3-omni", contents: [{ type: "prompt", text: "p" }], settings: { aspect_ratio: "16:9" } });
-    // 服务端实测：base_video 编辑、feature_video 参考也要求 aspect_ratio（文档写的「有参考视频可不传」不成立）；只有首帧可省略
+    // aspect_ratio 仅在有首帧时可省略（画幅跟随首帧）；base_video / feature_video 场景必传
     const v = "https://x/in.mp4";
     bad("wand/kling/omni-video", { model: "kling-video-v3-omni", contents: [{ type: "prompt", text: "p" }, { type: "base_video", url: v }] }, /aspect_ratio with base_video/);
     bad("wand/kling/omni-video", { model: "kling-video-v3-omni", contents: [{ type: "prompt", text: "p" }, { type: "feature_video", url: v }] }, /aspect_ratio with feature_video/);
@@ -392,7 +392,8 @@ describe("请求体校验（适用模型 / 必填 / 互斥）", () => {
     ok(O, { model: "kling-video-v4", contents: [p, { type: "feature_video", url: v }], settings: { aspect_ratio: "adaptive", duration: 30 } });
     bad(O, { model: "kling-video-v4", contents: [p, { type: "base_video", url: v }] }, /does not support base_video/);
     bad(O, { model: "kling-video-v4", contents: [p, first], settings: { audio: "off" } }, /settings\.audio is only supported by/);
-    bad(O, { model: "kling-video-v4", contents: [p, { type: "feature_video", url: "AAAA" }] }, /public URLs/);
+    // v4 feature_video 支持本地文件（编码为 data URL）
+    ok(O, { model: "kling-video-v4", contents: [p, { type: "feature_video", url: "data:video/mp4;base64,AAAA" }] });
     const refs = (n: number) => Array.from({ length: n }, (_, i) => ({ type: "refer_image", url: `https://x/${i}.jpg` }));
     bad(O, { model: "kling-video-v4", contents: [p, ...refs(11)] }, /At most 10 blocks of type=image/);
     // v4 图片单张 ≤30MB：本地文件编码为 data URL 后按 Base64 载荷估算（30MB 文件 → 恰 40_000_000 载荷，放行；40_000_002 → 30MB+1.5B，拦截）
@@ -519,8 +520,8 @@ describe("本地文件编码位置（mapMedia）", () => {
     assert.equal(omniUrl.encoding, "dataUrl");
     assert.deepEqual(omniUrl.formats, ["mp4", "mov"]);
     assert.equal(omniUrl.maxBytes, 75_000_000);
-    // vega：content 三规则——image_url / audio_url 可本地（dataUrl，实测上游接受；audio 时长须 2~15s）；
-    // video_url 上游明确拒绝内联 base64（2026-11-03 实测 400），仅公网 URL
+    // vega：content 三规则——image_url / audio_url 可本地（dataUrl；audio 时长须 2~15s）；
+    // video_url 仅公网 URL（拒绝内联 base64）
     const vegaContent = param("wand/vega-videos/tasks", "content").media as MediaSpec[];
     assert.ok(Array.isArray(vegaContent), "content.media 应为数组（三规则）");
     assert.deepEqual(

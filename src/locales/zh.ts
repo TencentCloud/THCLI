@@ -1091,7 +1091,6 @@ export const ZH: Messages = {
   "gen.rule.kling.lastNeedsFirst": "不支持仅尾帧：传 last_frame 时须同时传 first_frame",
   "gen.rule.kling.tooMany": "type={type} 的素材最多 {max} 个",
   "gen.rule.kling.voiceNeedsAudio": "引用音色（type=voice）时 settings.audio 不能为 off 或缺省，请显式设置 settings.audio",
-  "gen.rule.kling.v4VideoUrlOnly": "kling-video-v4 的参考视频仅支持公网 URL（http/https），不支持本地文件或 Base64",
   "gen.rule.kling.v4ImageMax30m": "kling-video-v4 图片单张 ≤30MB（本地文件超限；远程 URL 大小由服务端校验）",
   "gen.rule.kling.v4TotalMax": "kling-video-v4 单次任务素材总数（图片 + 视频 + 主体 + 音色）最多 15 个",
   "gen.rule.kling.featureNoLastFrame": "使用参考视频 feature_video 时不支持尾帧 last_frame",

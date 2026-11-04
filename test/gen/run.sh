@@ -234,7 +234,7 @@ run_case gen-status-01 local "fail:--param"                  "status 不收 --pa
   "$THCLI" +gen status wand/vidu/text-to-video x --param a=1
 run_case gen-tasks-01  local "fail:--limit"                  "tasks --limit 非正整数被拦" \
   "$THCLI" +gen tasks --limit 0
-# Kling omni：参考视频（base_video / feature_video）也要求 settings.aspect_ratio（文档写可不传，服务端实际要求）
+# Kling omni：aspect_ratio 仅在有首帧时可省略；base_video / feature_video 场景必传
 run_case gen-omni-ratio-01 local "fail:base_video 时也须指定"      "omni base_video 缺 aspect_ratio 本地拦" \
   "$THCLI" +gen wand/kling/omni-video --model kling-video-v3-omni --contents '[{"type":"prompt","text":"夜景"},{"type":"base_video","url":"https://x/in.mp4"}]' --dry-run
 run_case gen-omni-ratio-02 local "fail:feature_video 时也须指定"   "omni feature_video 缺 aspect_ratio 本地拦" \

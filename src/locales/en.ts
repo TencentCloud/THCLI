@@ -1095,7 +1095,6 @@ export const EN: Messages = {
   "gen.rule.kling.lastNeedsFirst": "Last frame only is not supported: last_frame requires a first_frame",
   "gen.rule.kling.tooMany": "At most {max} blocks of type={type}",
   "gen.rule.kling.voiceNeedsAudio": "settings.audio cannot be off or omitted when a voice (type=voice) is referenced; set settings.audio explicitly",
-  "gen.rule.kling.v4VideoUrlOnly": "kling-video-v4 reference videos accept public URLs (http/https) only, not local files or Base64",
   "gen.rule.kling.v4ImageMax30m": "kling-video-v4 images must be <=30MB each (local file over the limit; remote URL size is checked server-side)",
   "gen.rule.kling.v4TotalMax": "kling-video-v4 accepts at most 15 materials per task (images + videos + elements + voices)",
   "gen.rule.kling.featureNoLastFrame": "last_frame is not supported with a feature_video",
