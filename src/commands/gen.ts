@@ -1098,9 +1098,13 @@ async function generate(apiId: string, opts: GenOptions, globals: GlobalArgs): P
     if (!isRequestTimeout(err) && !isNetworkError(err)) throw err;
     // 超时 / 网络中断（均无回包）：同步 = 未提交，重试无副作用；异步 = 无法确认是否已创建——
     // 先查任务列表防重复提交（生成任务重复提交 = 重复扣费）
-    const hint = api.sync
-      ? t("gen.requestTimeoutRetry", { cmd: retryCommand() })
-      : t("gen.requestTimeoutAsync", { tasks: "thcli +gen tasks", cmd: retryCommand() });
+    // 网络错误（fetch failed：请求未发出，如 DNS / 连接失败）与超时分开提示：
+    // 「增大 --timeout」对网络错误无效，应引导查网络本身
+    const hint = !isRequestTimeout(err)
+      ? t("gen.networkErrorRetry", { cmd: retryCommand() })
+      : api.sync
+        ? t("gen.requestTimeoutRetry", { cmd: retryCommand() })
+        : t("gen.requestTimeoutAsync", { tasks: "thcli +gen tasks", cmd: retryCommand() });
     throw new Error(`${(err as Error).message}\n${hint}`);
   } finally {
     // 同步整个流程（请求 + 下载）结束清指引；异步正常路径交给 poll 接管，异常路径一并清掉

@@ -10,6 +10,7 @@
  * 纯函数：不发请求、不读写文件（本地文件编码由命令层按 ParamSpec.media 处理）。
  */
 
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { UNSAFE_KEYS } from "./config.js";
 import { lang, t } from "./i18n.js";
 import type { VendorId } from "./gen-errors.js";
@@ -66,6 +67,8 @@ export interface ParamField {
   fields?: ParamField[];
   /** 适用模型（缺省 = 接口全部模型）；仅对 object 参数的直接子字段生效（如 Kling settings.multi_shot 仅 V3） */
   models?: string[];
+  /** 仅当所在对象（或其祖先对象）中 field 的值等于 values 之一时该字段适用（如 hy-image v3.5 content[].is_generate 仅 role=tool） */
+  appliesWhen?: { field: string; values: Array<string | number | boolean> };
 }
 
 /** 字段值里的本地文件编码规则 */
@@ -400,20 +403,22 @@ const HY_IMAGE_V35: FamilySpec = {
       required: true,
       media: IMG("dataUrl", ["content.image_url.url"]),
       fields: [
-        F("role", "string", T("角色", "Role"), { required: true, choices: ["user", "assistant", "tool"] }),
-        F("content", "array", T("消息内容块", "Content blocks"), {
+        F("role", "string", T("角色：user=本轮指令 / assistant=历史回复 / tool=工具结果回灌", "Role: user=this turn / assistant=past reply / tool=tool result replay"), { required: true, choices: ["user", "assistant", "tool"] }),
+        F("content", "array", T("消息内容块（text 文本 / image_url 图片）", "Content blocks (text / image_url)"), {
           fields: [
             F("type", "string", T("块类型", "Block type"), { required: true, choices: ["text", "image_url"] }),
             F("text", "string", T("文本（type=text）", "Text (type=text)")),
             F("image_url", "object", T("图片（type=image_url；url 可为本地文件）", "Image (type=image_url; url may be a local file)"), {
               fields: [F("url", "string", T("图片地址", "Image URL"))],
             }),
-            F("is_generate", "boolean", T("是否为生成结果", "Whether it is a generated result")),
+            F("is_generate", "boolean", T("生成结果标记（仅 role=tool 消息可传：标记该图是上一轮 generate 工具产出）", "Generated-result flag (role=tool only: marks the image as the previous generate tool output)"), {
+              appliesWhen: { field: "role", values: ["tool"] },
+            }),
           ],
         }),
-        F("reasoning", "string", T("思考内容（多轮回灌）", "Reasoning (multi-turn)")),
-        F("tool_calls", "json", T("工具调用（多轮回灌）", "Tool calls (multi-turn)")),
-        F("tool_call_id", "string", T("工具调用 ID（role=tool）", "Tool call ID (role=tool)")),
+        F("reasoning", "string", T("思考内容（仅 role=assistant 多轮回灌）", "Reasoning (role=assistant replay only)")),
+        F("tool_calls", "json", T("工具调用（仅 role=assistant 多轮回灌）", "Tool calls (role=assistant replay only)")),
+        F("tool_call_id", "string", T("工具调用 ID（仅 role=tool，须与上一条 assistant.tool_calls[i].id 一致）", "Tool call ID (role=tool only; must match the previous assistant.tool_calls[i].id)")),
       ],
     }),
     S("size", T("宽x高，宽高 [256,8192]，面积 ≤16777216", "WxH, sides [256,8192], area <= 16777216")),
@@ -425,7 +430,20 @@ const HY_IMAGE_V35: FamilySpec = {
     O("use_search_tool", T("外部搜索增强（默认关闭）", "External search enhancement (off by default)"), [F("value", "boolean", T("开关", "On/off"))]),
   ],
   doc: "https://cloud.tencent.com/document/product/1823/135745",
-  validateBody: hyImageSizeCheck(256, 8192, 16_777_216, "16777216"),
+  validateBody: (body) => {
+    const sizeErr = hyImageSizeCheck(256, 8192, 16_777_216, "16777216")(body);
+    if (sizeErr) return sizeErr;
+    // is_generate 仅 role=tool 消息可传（文档 2.3：其它场景不传）
+    const messages = (Array.isArray(body["messages"]) ? body["messages"] : []) as Obj[];
+    for (const m of messages) {
+      if (m?.["role"] === "tool") continue;
+      const blocks = (Array.isArray(m?.["content"]) ? m["content"] : []) as Obj[];
+      if (blocks.some((b) => b?.["is_generate"] !== undefined && b["is_generate"] !== null)) {
+        return t("gen.rule.hy.isGenerateToolOnly");
+      }
+    }
+    return undefined;
+  },
   requestNote: T(
     'Chat/Messages 协议，messages 为多轮会话（最后一条 role=user 是本轮指令）。示例：\n--messages \'[{"role":"user","content":[{"type":"text","text":"一只猫"},{"type":"image_url","image_url":{"url":"./ref.png"}}]}]\'\n多轮编辑：把上轮响应的 assembled_history 原样写进 --messages 再追加本轮 user 消息',
     'Chat/Messages protocol; messages is a multi-turn session (the last role=user is this turn). Example:\n--messages \'[{"role":"user","content":[{"type":"text","text":"a cat"},{"type":"image_url","image_url":{"url":"./ref.png"}}]}]\'\nMulti-turn edit: put the previous assembled_history into --messages and append this turn\'s user message',
@@ -590,6 +608,68 @@ const KLING_IMAGE: FamilySpec = {
     const wmUrls = [...urlsOf(pick(body, "task_result.images"), "watermark_url"), ...urlsOf(pick(body, "task_result.series_images"), "watermark_url")];
     return result(normalizeState(body["task_status"]), urls, body, wmUrls);
   },
+};
+
+/**
+ * HiDream 生图（智象未来）：文生与图生编辑两个接口，同步调用（文档口径 30~120 秒，超时建议 ≥300s）。
+ * edits 的 images 实测支持 data URL 内联（2026-11-10 确认；文档仅列 URL + multipart，声明滞后）：
+ * 本地文件按 dataUrl 编码，Base64 合计 ≤100MB（原始文件合计 ≤75MB，二者为 3/4 换算等价）。
+ */
+const HIDREAM_SIZES = ["2048x2048", "2304x1728", "1728x2304", "2560x1440", "1440x2560", "2496x1664", "1664x2496"];
+const HIDREAM_SIZE = S("size", T(
+  "生成尺寸（7 档预设，原生 2K：1:1 / 4:3 / 3:4 / 16:9 / 9:16 / 3:2 / 2:3；缺省 auto 由模型自适应）",
+  "Output size (7 native-2K presets: 1:1 / 4:3 / 3:4 / 16:9 / 9:16 / 3:2 / 2:3; default auto, model-adaptive)",
+), { choices: [...HIDREAM_SIZES, "auto"] });
+const HIDREAM_IMAGE: FamilySpec = {
+  id: "hidream-image",
+  maxPromptChars: 5000,
+  kind: "image",
+  models: ["hidream-image-o1-1.5", "hidream-image-o1-1.5-edit"],
+  sync: true,
+  sizeLimit: 20_000_000,
+  formats: ["png", "jpeg", "jpg", "bmp", "tiff", "webp", "gif"],
+  apis: {
+    generations: {
+      models: ["hidream-image-o1-1.5"],
+      params: [
+        PROMPT(T("文本提示词（≤5000 字符，擅长中英文与数字的文字渲染、复杂版式与多主体控制）", "Prompt (<=5000 chars; strong at CJK/numeric text rendering, complex layouts and multi-subject control)")),
+        HIDREAM_SIZE,
+      ],
+    },
+    edits: {
+      models: ["hidream-image-o1-1.5-edit"],
+      params: [
+        PROMPT(T("编辑意图提示词（≤5000 字符，自然语言指令：换风格 / 调色 / 增删元素 / 换背景 / 改写文字）", "Edit-intent prompt (<=5000 chars; natural-language instructions: restyle / recolor / add-remove elements / swap background / rewrite text)")),
+        A("images", T("参考图 1~6 张（公网 URL 或本地文件，本地自动转 Base64 data URL；png/jpeg/jpg/bmp/tiff/webp/gif、单图 ≤20MB、全部合计原始 ≤75MB / Base64 ≤100MB；多张可锁定人物 / 商品 / IP 外观保持主体一致）", "Reference images, 1-6 (public URLs or local files auto-inlined as Base64 data URLs; png/jpeg/jpg/bmp/tiff/webp/gif, each <=20MB, <=75MB raw / 100MB Base64 in total; multiple images keep the subject consistent)"), {
+          required: true,
+          media: IMG("dataUrl"),
+        }),
+        HIDREAM_SIZE,
+      ],
+      validateBody: (body) => {
+        const images = body["images"];
+        if (Array.isArray(images) && (images.length < 1 || images.length > 6)) {
+          return t("gen.rule.hidream.imageCount", { count: images.length });
+        }
+        // Base64 合计 ≤100MB（⟺ 原始文件合计 ≤75MB，3/4 换算；实测口径，文档未列）
+        if (Array.isArray(images)) {
+          let b64Total = 0;
+          for (const img of images) {
+            if (typeof img === "string" && img.startsWith("data:")) {
+              const comma = img.indexOf(",");
+              b64Total += comma >= 0 ? img.length - comma - 1 : 0;
+            }
+          }
+          if (b64Total > 100_000_000) {
+            return t("gen.rule.hidream.imagesTotal", { mb: Math.round(b64Total / 100_000) / 10 });
+          }
+        }
+        return undefined;
+      },
+    },
+  },
+  doc: "https://cloud.tencent.com/document/product/1823/140689",
+  parse: (resp) => syncResult(urlsOf(resp["data"]), resp),
 };
 
 // ---------------------------------------------------------------- 视频
@@ -961,10 +1041,14 @@ const KLING_MOTION_CONTROL: FamilySpec = {
   sizeLimit: 50_000_000,
   formats: ["jpeg", "png"],
   params: [
-    A("contents", T("参考素材合集（须含 type=image 形象图与 type=video 动作视频，视频仅 URL；element 仅 v3.0 且最多 1 个，需同时给 id；prompt ≤2500）", "Reference blocks (type=image character image and type=video motion video required, video URL only; element: v3.0 only, at most 1, id required; prompt <=2500)"), {
+    A("contents", T("参考素材合集（须含 type=image 形象图与 type=video 动作视频，图片 / 视频 url 均可为本地文件，视频 mp4/mov ≤75MB；element 仅 v3.0 且最多 1 个，需同时给 id；prompt ≤2500）", "Reference blocks (type=image character image and type=video motion video required, image / video url may be local files, video mp4/mov <=75MB; element: v3.0 only, at most 1, id required; prompt <=2500)"), {
       required: true,
-      media: IMG("dataUrl", ["url"]),
-      fields: KLING_CONTENT_FIELDS(["prompt", "image", "video", "element"]),
+      media: AUTO("dataUrl", ["url"], { formats: ["mp4", "mov"], maxBytes: 75_000_000 }),
+      fields: KLING_CONTENT_FIELDS(
+        ["prompt", "image", "video", "element"],
+        [],
+        T("图片 / 视频素材（均可为本地文件，视频 mp4/mov ≤75MB）", "Image / video material (local files allowed, video mp4/mov <=75MB)"),
+      ),
     }),
     O("settings", T("输出配置（无 duration，输出时长跟随动作视频）", "Output settings (no duration; follows the motion video)"), [
       F("character_orientation", "string", T("人物朝向：image 与形象图一致（参考视频 ≤10s）/ video 与动作视频一致（≤30s）；引用主体时只能 video", "Character orientation: image (motion video <=10s) / video (<=30s); must be video with an element"), { required: true, choices: ["image", "video"] }),
@@ -983,7 +1067,6 @@ const KLING_MOTION_CONTROL: FamilySpec = {
     const allowed = model === KMC30 ? ["prompt", "image", "video", "element"] : ["prompt", "image", "video"];
     const err = klingBlocksError(model, blocks, allowed);
     if (err) return err;
-    if (blocks.some((b) => b["type"] === "video" && !isUrl(b["url"]))) return t("gen.rule.motion.videoUrlOnly");
     if (countOf(types, "element") > 1) return t("gen.rule.kling.tooMany", { type: "element", max: 1 });
     if (blocks.some((b) => b["type"] === "element" && !has(b, "id"))) return t("gen.rule.kling.blockField", { type: "element", field: "id" });
     if (types.includes("element") && settingsOf(body)["character_orientation"] !== "video") return t("gen.rule.motion.elementOrientation");
@@ -1269,7 +1352,8 @@ const contentTextLengthCheck = (max: number): ((body: Obj) => string | undefined
 const MINIMAX_V2: FamilySpec = {
   id: "minimax-video-v2",
   vendor: "minimax-h3",
-  maxPromptChars: 2000,
+  // 调用指南（2026-11 更新）：content 内 text 块 ≤7000 字符
+  maxPromptChars: 7000,
   kind: "video",
   models: ["minimax-video-h3", "minimax-video-h3-max"],
   sync: false,
@@ -1292,7 +1376,7 @@ const MINIMAX_V2: FamilySpec = {
     }),
     B("aigc_watermark", T("AIGC 水印（默认 false）", "AIGC watermark (default false)")),
     O("extra", T("扩展参数", "Extra options"), [
-      F("prompt_expansion_mode", "string", T("提示词扩写模式（默认 balanced）", "Prompt expansion mode (default balanced)"), { choices: ["disabled", "balanced", "quality"] }),
+      F("prompt_expansion_mode", "string", T("提示词扩写模式（默认 balanced）", "Prompt expansion mode (default balanced)"), { choices: ["disabled", "balanced", "quality"], models: ["minimax-video-h3-max"] }),
     ]),
   ],
   doc: "https://cloud.tencent.com/document/product/1823/135737",
@@ -1303,8 +1387,13 @@ const MINIMAX_V2: FamilySpec = {
     if (textOnly && (!has(body, "ratio") || body["ratio"] === "adaptive")) {
       return t("gen.rule.minimaxV2.ratio");
     }
+    // 图生（first_frame / last_frame）与多模态参考生（reference_*）互斥（调用指南「注意」）
+    const roles = new Set(content.map((c) => str(c?.["role"])).filter(Boolean));
+    const hasFrame = roles.has("first_frame") || roles.has("last_frame");
+    const hasRef = roles.has("reference_image") || roles.has("reference_video") || roles.has("reference_audio");
+    if (hasFrame && hasRef) return t("gen.rule.minimaxV2.roles");
     // text 块长度（与族 maxPromptChars 同口径，checkBody 顶层键检查不覆盖数组内块）
-    return contentTextLengthCheck(2000)(body);
+    return contentTextLengthCheck(7000)(body);
   },
   taskIdOf: (resp) => firstStr(resp, "task_id"),
   query: (_m, id) => ({ method: "GET", path: `/v1/wand/minimax-video-v2/tasks/${encodeURIComponent(id)}` }),
@@ -1314,10 +1403,12 @@ const MINIMAX_V2: FamilySpec = {
   },
 };
 
+const WAND_TEXT_MAX = 8192;
+
 const WAND_VIDEO: FamilySpec = {
   id: "wand-video",
-  // 提示词上限 8192（调用指南口径）
-  maxPromptChars: 8192,
+  // 提示词上限（调用指南口径）；content 内 text 块校验复用同一常量
+  maxPromptChars: WAND_TEXT_MAX,
   kind: "video",
   models: ["wand-vega-video-1.0-lite"],
   sync: false,
@@ -1347,8 +1438,8 @@ const WAND_VIDEO: FamilySpec = {
     ]),
   ],
   doc: "https://cloud.tencent.com/document/product/1823/138195",
-  // content 内 text 块长度（调用指南口径 8192）
-  validateBody: contentTextLengthCheck(8192),
+  // content 内 text 块长度（调用指南口径）
+  validateBody: contentTextLengthCheck(WAND_TEXT_MAX),
   taskIdOf: (resp) => firstStr(resp, "id", "task_id"),
   query: (_m, id) => ({ method: "GET", path: `/v1/wand/vega-videos/tasks/${encodeURIComponent(id)}` }),
   parse: (resp) => {
@@ -1488,12 +1579,21 @@ const AUDIO_FORMAT_MIME: Record<string, string> = {
   opus: "audio/opus",
 };
 
+/** 长字符串是否纯 hex：逐字符扫描（正则 ^[0-9a-f]+$ 在数 MB hex 音频上会打爆 V8 调用栈） */
+function isHexChars(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (!((c >= 48 && c <= 57) || (c >= 97 && c <= 102) || (c >= 65 && c <= 70))) return false;
+  }
+  return true;
+}
+
 /** 音频结果归一：URL 原样；hex 转 data URL，让下载层统一按 URL 处理 */
 function audioOf(raw: unknown, format?: unknown): string | undefined {
   const text = str(raw);
   if (!text) return undefined;
   if (/^https?:\/\//i.test(text)) return text;
-  if (/^[0-9a-f]+$/i.test(text) && text.length % 2 === 0) {
+  if (text.length % 2 === 0 && isHexChars(text)) {
     const mime = AUDIO_FORMAT_MIME[str(format ?? "") ?? ""] ?? "audio/mpeg";
     return `data:${mime};base64,${Buffer.from(text, "hex").toString("base64")}`;
   }
@@ -1538,17 +1638,43 @@ const ASR: FamilySpec = {
     const subtitleUrl = str(out["subtitle_url"]);
     if (!text && !subtitleUrl) return audioFailed(resp, t("gen.result.noText"));
     const source = str(out["source"]);
+    const durationMs = out["duration_ms"];
     return {
       state: "succeeded",
       urls: subtitleUrl ? [subtitleUrl] : [],
       extraUrls: [],
       texts: text ? [text] : [],
-      meta: source ? { language: source } : undefined,
+      meta: {
+        ...(source ? { language: source } : {}),
+        ...(typeof durationMs === "number" ? { duration_ms: String(durationMs) } : {}),
+      },
     };
   },
 };
 
-const ASR_SOURCE = S("source", T("识别语种（缺省自动检测）", "Source language (auto-detected if absent)"));
+/** WAND 同步语音识别「支持语言」全量列表（文档 135793 底部，147 语种）；
+ *  Hy 模型支持其中中文 / 英语 / 部分方言，其余语种选中后由上游裁决 */
+const ASR_LANGS = [
+  "af-ZA", "sq-AL", "am-ET", "ar-DZ", "ar-BH", "ar-EG", "ar-IQ", "ar-IL", "ar-JO", "ar-KW",
+  "ar-LB", "ar-MR", "ar-MA", "ar-OM", "ar-QA", "ar-SA", "ar-PS", "ar-SY", "ar-TN", "ar-AE",
+  "ar-YE", "hy-AM", "az-AZ", "eu-ES", "bn-BD", "bn-IN", "bs-BA", "bg-BG", "my-MM", "ca-ES",
+  "zh-CN", "zh-HK", "zh-TW", "yue", "hr-HR", "cs-CZ", "da-DK", "nl-BE", "nl-NL", "en-AU",
+  "en-CA", "en-GH", "en-HK", "en-IN", "en-IE", "en-KE", "en-NZ", "en-NG", "en-PK", "en-PH",
+  "en-SG", "en-ZA", "en-TZ", "en-GB", "en-US", "et-EE", "fil-PH", "fi-FI", "fr-BE", "fr-CA",
+  "fr-FR", "fr-CH", "gl-ES", "ka-GE", "de-AT", "de-DE", "de-CH", "el-GR", "gu-IN", "iw-IL",
+  "hi-IN", "hu-HU", "is-IS", "id-ID", "it-IT", "it-CH", "ja-JP", "jv-ID", "kn-IN", "kk-KZ",
+  "km-KH", "rw-RW", "ko-KR", "lo-LA", "lv-LV", "lt-LT", "mk-MK", "ms-MY", "ml-IN", "mr-IN",
+  "mn-MN", "ne-NP", "no-NO", "fa-IR", "pl-PL", "pt-BR", "pt-PT", "pa-Guru-IN", "ro-RO", "ru-RU",
+  "sr-RS", "si-LK", "sk-SK", "sl-SI", "st-ZA", "es-AR", "es-BO", "es-CL", "es-CO", "es-CR",
+  "es-DO", "es-EC", "es-SV", "es-GT", "es-HN", "es-MX", "es-NI", "es-PA", "es-PY", "es-PE",
+  "es-PR", "es-ES", "es-US", "es-UY", "es-VE", "su-ID", "sw-KE", "sw-TZ", "ss-Latn-ZA", "sv-SE",
+  "ta-IN", "ta-MY", "ta-SG", "ta-LK", "te-IN", "th-TH", "ts-ZA", "tn-Latn-ZA", "tr-TR", "uk-UA",
+  "ur-IN", "ur-PK", "uz-UZ", "ve-ZA", "vi-VN", "xh-ZA", "zu-ZA",
+];
+const ASR_SOURCE = S("source", T(
+  "识别语种（缺省自动检测；语种代码见 WAND 文档「支持语言」表，Hy 模型支持中文 / 英语 / 部分方言）",
+  "Source language (auto-detected if absent; language codes per the WAND doc table; Hy supports Chinese / English / some dialects)",
+), { choices: ASR_LANGS });
 
 /**
  * 天籁异步语音识别（Tenlai）：中英 + 31 种方言混合引擎，长音频（≤5 小时）转写。
@@ -1565,7 +1691,7 @@ const TENLAI_ASR: FamilySpec = {
     create_rec_task: {
       params: [
         S("input_url", T("音视频文件公网 URL（≤5 小时；与 --data 二选一）", "Audio/video public URL (<=5h; either this or --data)"), { media: MEDIA("urlOnly") }),
-        S("data", T("音频 Base64（可传本地文件；与 --input-url 二选一）", "Audio Base64 (local file allowed; either this or --input-url)"), { media: MEDIA("raw") }),
+        S("data", T("音频 Base64 ≤5MB，超出请用公网 URL（可传本地文件；与 --input-url 二选一）", "Audio Base64 <=5MB, use a public URL if larger (local file allowed; either this or --input-url)"), { media: MEDIA("raw", undefined, { maxBytes: 5_242_880 }) }),
       ],
       validateBody: (body) => exactlyOne(body, ["input_url", "data"], "create_rec_task"),
     },
@@ -1588,7 +1714,7 @@ const ASR_SYNC_PARAMS: ParamSpec[] = [
   S("input_url", T("音视频文件公网 URL（≤100MB / ≤30 分钟；与 data 二选一）", "Audio/video public URL (<=100MB / <=30min; either this or data)"), { media: MEDIA("urlOnly") }),
   S("data", T("音频 Base64（可传本地文件，≤75MB；与 input_url 二选一）", "Audio Base64 (local file allowed, <=75MB; either this or input_url)"), { media: MEDIA("raw", undefined, { maxBytes: 75_000_000 }) }),
   ASR_SOURCE,
-  S("voice_encode_format", T("音频编码（如 pcm/wav/mp3，缺省 auto）", "Audio encoding (e.g. pcm/wav/mp3, default auto)")),
+  S("voice_encode_format", T("音频编码（默认 auto；下拉为文档列出的取值，其余编码请用 --body 直传）", "Audio encoding (default auto; listed values per docs, use --body for others)"), { choices: ["auto", "pcm", "wav", "ogg", "mp3"] }),
 ];
 
 const ASR_ASYNC_PARAMS: ParamSpec[] = [
@@ -1722,6 +1848,13 @@ const VOICE_DESIGN: FamilySpec = {
   },
 };
 
+/** AI 配音「支持语种」全量列表（文档 135800 附录，33 语种；匈牙利语为 hun——ISO 639-2/B，非常见的 hu） */
+const DUB_LANGS = [
+  "zh", "en", "ja", "de", "fr", "ko", "ru", "uk", "pt", "it", "es",
+  "id", "nl", "tr", "fil", "ms", "el", "fi", "hr", "sk", "pl", "sv",
+  "hi", "bg", "ro", "ar", "cs", "da", "ta", "hun", "vi", "th", "yue",
+];
+
 /** AI 配音（异步）：视频输入 → 翻译配音视频 */
 const DUB: FamilySpec = {
   id: "wand-dubbing",
@@ -1734,8 +1867,8 @@ const DUB: FamilySpec = {
       required: true,
       media: MEDIA("dataUrl", undefined, { formats: ["mp4", "mov", "m4v"], maxBytes: 75_000_000 }),
     }),
-    S("src_language", T("源语言代码（默认 zh）", "Source language code (default zh)")),
-    S("dst_language", T("目标语言代码（默认 en）", "Target language code (default en)")),
+    S("src_language", T("源语言（默认 zh；33 语种见文档附录，匈牙利语为 hun）", "Source language (default zh; 33 languages per doc appendix, Hungarian is hun)"), { choices: DUB_LANGS }),
+    S("dst_language", T("目标语言（默认 en；33 语种见文档附录，匈牙利语为 hun）", "Target language (default en; 33 languages per doc appendix, Hungarian is hun)"), { choices: DUB_LANGS }),
   ],
   doc: "https://cloud.tencent.com/document/product/1823/135800",
   taskIdOf: (resp) => firstStr(resp, "id", "task_id"),
@@ -1797,7 +1930,7 @@ const MINIMAX_MUSIC_LYRICS_MAX = 3500;
 const MUREKA_PROMPT_MAX = 1024;
 
 /** Mureka 生成数量：三接口共用，默认 2 且按首计费 */
-const MUREKA_N = N("n", T("生成数量 [1, 3]（默认 2，按首计费）", "Track count [1, 3] (default 2, billed per track)"));
+const MUREKA_N = N("n", T("生成数量 [1, 3]（默认 1，按生成数量计费）", "Track count [1, 3] (default 1, billed per track)"));
 
 /**
  * 音乐生成 Mureka（同步）：同一模型 mureka-music-v9，三种能力按接口区分——
@@ -1858,7 +1991,19 @@ const MUREKA_MUSIC: FamilySpec = {
     if (n !== undefined && !(Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 3)) return t("gen.rule.mureka.badN", { n: JSON.stringify(n) });
     return undefined;
   },
-  parse: (resp) => syncResult(urlsOf(resp["choices"]), resp),
+  parse: (resp) => {
+    // 同步调用但响应带 status（preparing/queued/running/streaming/reviewing/succeeded/failed/timeouted/cancelled）：
+    // 业务失败可能落在 HTTP 200 下，failed_reason / timeouted 等要给出明确失败态
+    const status = String(resp["status"] ?? "").trim().toLowerCase();
+    if (status && status !== "succeeded") {
+      return { state: "failed", urls: [], extraUrls: [], error: errorOf(resp) ?? t("gen.result.statusFailed", { status }) };
+    }
+    const urls = urlsOf(resp["choices"]);
+    if (!urls.length) return { state: "failed", urls: [], extraUrls: [], error: errorOf(resp) ?? t("gen.result.noUrl") };
+    // 无损版（响应示例带 flac_url，输出参数表未列）放 extras，与 mp3 主文件分开
+    const flac = urlsOf(resp["choices"], "flac_url").filter((u) => !urls.includes(u));
+    return result("succeeded", urls, resp, flac);
+  },
 };
 
 /** 全部模型族 */
@@ -1869,6 +2014,7 @@ export const FAMILIES: FamilySpec[] = [
   WAND_IMAGE,
   VIDU_IMAGE,
   KLING_IMAGE,
+  HIDREAM_IMAGE,
   HY_VIDEO,
   KLING_VIDEO,
   KLING_VIDEO_OMNI,
@@ -2075,6 +2221,9 @@ export function paramHelpText(p: ParamSpec): string {
  * 把 --param 解析成对象（键支持点路径：settings.audio=native）：
  *   key=value    值一律是字符串（--param id=123 → "123"）
  *   key:=json    值按 JSON 解析（--param n:=2 / flag:=true / cfg:='{"a":1}' / l:='[1,2]'）
+ * 值支持 @file 展开（与 media 字段的 @路径编码语义不同）：值以 @ 开头且为存在的文件 →
+ * 读文件文本为值（Web 服务端把超大 Base64 / 长 JSON 落临时文件后以 @file 传递，避开
+ * execve 单参数 128KB 上限）。@ 指向的文件不存在时按字面值原样传。
  */
 export function parseParams(pairs: string[]): Obj {
   const out: Obj = {};
@@ -2085,7 +2234,17 @@ export function parseParams(pairs: string[]): Obj {
     if (eq <= 0 || !key) {
       throw new Error(t("gen.check.paramSyntax", { pair }));
     }
-    const raw = pair.slice(eq + 1);
+    let raw = pair.slice(eq + 1);
+    if (raw.startsWith("@")) {
+      const file = raw.slice(1);
+      try {
+        if (file && existsSync(file) && statSync(file).isFile()) {
+          raw = readFileSync(file, "utf8");
+        }
+      } catch {
+        // 读失败按字面值
+      }
+    }
     let value: unknown = raw;
     if (isJson) {
       try {
@@ -2214,6 +2373,8 @@ export const APIS: ApiRef[] = [
       "Model differences: kling-image-v3 uses image (single) and supports negative_prompt (text-to-image only); o1 / v3-omni use image_list (up to 10); result_type=series is v3-omni only",
     ),
   }),
+  apiRefOf({ id: "wand/hidream-image/images/generations", family: HIDREAM_IMAGE, apiName: "generations" }),
+  apiRefOf({ id: "wand/hidream-image/images/edits", family: HIDREAM_IMAGE, apiName: "edits" }),
   // ---- 视频 ----
   apiRefOf({ id: "wand/hunyuan-video/generation", family: HY_VIDEO }),
   apiRefOf({ id: "wand/kling/text-to-video", family: KLING_VIDEO, apiName: "text-to-video" }),

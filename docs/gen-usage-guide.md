@@ -1,6 +1,6 @@
 # THCLI-AIGC `+gen` / `doctor` 使用指南
 
-适用版本：**1.0.2+（含未发布改动）**（36 个生成接口：图像 6 / 视频 16 / 3D 3 / 语音音频 11）
+适用版本：**1.0.2+（含未发布改动）**（38 个生成接口：图像 8 / 视频 16 / 3D 3 / 语音音频 11）
 
 通用约定：
 
@@ -14,7 +14,7 @@
 ## 1. 接口发现与帮助
 
 ```bash
-# 列出全部 36 个接口（接口 ID / 类别 / 模型 / 同步异步 / 参数数）
+# 列出全部 38 个接口（接口 ID / 类别 / 模型 / 同步异步 / 参数数）
 thcli +gen apis
 
 # 查看单个接口的完整用法、路径、参数说明与模型差异
@@ -31,7 +31,7 @@ thcli +gen --help
 
 ## 2. 生成用例
 
-### 2.1 图像（6 个接口）
+### 2.1 图像（8 个接口）
 
 ```bash
 # 混元生图 v3：文生图（同步，提交即返回）
@@ -67,6 +67,18 @@ thcli +gen wand/kling-image/generation \
   --model kling-image-o1 \
   --prompt "这只小狗在草地上奔跑" \
   --element-list '[{"element_id":"el-xxxx"}]'
+
+# HiDream 生图：文生图（同步，原生 2K；size 7 档预设，缺省 auto 由模型自适应）
+thcli +gen wand/hidream-image/images/generations \
+  --model hidream-image-o1-1.5 \
+  --prompt "电商主图：夏日气泡水，画面文字「清凉一夏」" \
+  --size 1728x2304
+
+# HiDream 编辑：自然语言改图（同步；images 为公网 URL，1~6 张，多张可锁定主体一致）
+thcli +gen wand/hidream-image/images/edits \
+  --model hidream-image-o1-1.5-edit \
+  --prompt "换成红色连衣裙，背景改为海边日落" \
+  --images '["https://example.com/model.png"]'
 ```
 
 ### 2.2 视频（16 个接口）
@@ -118,7 +130,7 @@ thcli +gen wand/vidu/reference-to-video \
   --subjects '[{"name":"主角","images":["./正面.png","./侧面.png"]}]' \
   --prompt "@主角 站在山顶眺望云海"
 
-# MiniMax H3：多模态素材（文生时 ratio 必填且不可 adaptive）
+# MiniMax H3：多模态素材（文生时 ratio 必填且不可 adaptive；图生 first_frame/last_frame 与参考生 reference_* 互斥；content text ≤7000 字符）
 thcli +gen wand/minimax-video-v2/generation \
   --model minimax-video-h3 \
   --content '[{"type":"text","text":"海浪拍打礁石，慢镜头"}]' \
@@ -204,7 +216,7 @@ thcli +gen wand/minimax-music/generation \
   --model minimax-music-v3.0 \
   --prompt "夏日情歌，吉他伴奏" --lyrics-optimizer true
 
-# Mureka 歌词成曲（三种能力按接口区分；--n 默认 2 且按首计费，只要 1 首务必 --n 1）
+# Mureka 歌词成曲（三种能力按接口区分；--n 默认 1，按生成数量计费）
 thcli +gen wand/mureka-music/generation \
   --model mureka-music-v9 \
   --lyrics $'[Verse]\n夏天的风\n[Chorus]\n吹过海边' \

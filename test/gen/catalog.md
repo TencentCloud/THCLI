@@ -5,11 +5,11 @@
 
 | 类别 | 接口数 | 用例数 |
 |---|---|---|
-| [图像](#图像) | 6 | 62 |
+| [图像](#图像) | 8 | 69 |
 | [视频](#视频) | 16 | 155 |
 | [3D](#3d) | 3 | 25 |
 | [语音](#语音) | 11 | 69 |
-| **合计** | **36** | **311** |
+| **合计** | **38** | **318** |
 
 ## 图像
 
@@ -21,6 +21,8 @@
 | [wand/vega-images/generations](#wandvega-imagesgenerations) | wand-vega-image-lite / wand-vega-image-flash / wand-vega-image-pro / wand-vega-image-1.5-pro | *--prompt --input --size | 4 |
 | [wand/vidu-image/generation](#wandvidu-imagegeneration) | vidu-image-q2 | *--prompt --images --aspect-ratio --resolution --seed --callback-url | 7 |
 | [wand/kling-image/generation](#wandkling-imagegeneration) | kling-image-v3 / kling-image-o1 / kling-image-v3-omni | *--prompt --negative-prompt --image --image-list --element-list --aspect-ratio --resolution --n --watermark-info --result-type --series-amount | 17 |
+| [wand/hidream-image/images/generations](#wandhidream-imageimagesgenerations) | hidream-image-o1-1.5 | *--prompt --size | 3 |
+| [wand/hidream-image/images/edits](#wandhidream-imageimagesedits) | hidream-image-o1-1.5-edit | *--prompt *--images --size | 4 |
 
 ### wand/hunyuan-image/v3-generation
 
@@ -113,6 +115,23 @@
 | img-kling-image-generation-15 | kling-image-v3 传 --image-list | `thcli +gen wand/kling-image/generation --model kling-image-v3 --prompt 猫 --image-list '["https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/images/cat-window.jpg"]'` | 适用模型 | 本地报「仅 kling-image-o1 / kling-image-v3-omni 支持」 |
 | img-kling-image-generation-16 | kling-image-v3 传 --result-type | `thcli +gen wand/kling-image/generation --model kling-image-v3 --prompt 猫 --result-type single` | 适用模型 | 本地报「仅 kling-image-o1 / kling-image-v3-omni 支持」 |
 | img-kling-image-generation-17 | kling-image-v3 传 --series-amount | `thcli +gen wand/kling-image/generation --model kling-image-v3 --prompt 猫 --series-amount 4` | 适用模型 | 本地报「仅 kling-image-v3-omni 支持」 |
+
+### wand/hidream-image/images/generations
+
+| ID | 场景 | 命令 | 覆盖 | 预期 |
+|---|---|---|---|---|
+| img-hidream-image-images-generations-01 | 最小调用 | `thcli +gen wand/hidream-image/images/generations --prompt 猫` | 必填字段 | 请求体含全部必填字段 |
+| img-hidream-image-images-generations-02 | --size | `thcli +gen wand/hidream-image/images/generations --prompt 猫 --size 2048x2048` | size | 请求体含 size |
+| img-hidream-image-images-generations-03 | 缺 --prompt | `thcli +gen wand/hidream-image/images/generations` | 必填校验 | 本地报「--prompt 必填」 |
+
+### wand/hidream-image/images/edits
+
+| ID | 场景 | 命令 | 覆盖 | 预期 |
+|---|---|---|---|---|
+| img-hidream-image-images-edits-01 | 最小调用 | `thcli +gen wand/hidream-image/images/edits --prompt 猫 --images '["https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/images/cat-window.jpg"]'` | 必填字段 | 请求体含全部必填字段 |
+| img-hidream-image-images-edits-02 | --size | `thcli +gen wand/hidream-image/images/edits --prompt 猫 --images '["https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/images/cat-window.jpg"]' --size 2048x2048` | size | 请求体含 size |
+| img-hidream-image-images-edits-03 | 缺 --prompt | `thcli +gen wand/hidream-image/images/edits --images '["https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/images/cat-window.jpg"]'` | 必填校验 | 本地报「--prompt 必填」 |
+| img-hidream-image-images-edits-04 | 缺 --images | `thcli +gen wand/hidream-image/images/edits --prompt 猫` | 必填校验 | 本地报「--images 必填」 |
 
 ## 视频
 
@@ -441,8 +460,8 @@
 | aud-asrproxy-synctranscribe-01 | 最小调用 | `thcli +gen wand/asrproxy/sync_transcribe --model hy-asr-3.0-preview --input-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/speech-zh-10s.wav` | 必填字段 | 请求体含全部必填字段 |
 | aud-asrproxy-synctranscribe-02 | --input-url | `thcli +gen wand/asrproxy/sync_transcribe --model hy-asr-3.0-preview --input-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/videos/dub-video.mp4` | input_url | 请求体含 input_url |
 | aud-asrproxy-synctranscribe-03 | --data | `thcli +gen wand/asrproxy/sync_transcribe --model hy-asr-3.0-preview --data ../assets/audio/speech-zh-10s.wav` | data | 请求体含 data |
-| aud-asrproxy-synctranscribe-04 | --source | `thcli +gen wand/asrproxy/sync_transcribe --model hy-asr-3.0-preview --input-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/speech-zh-10s.wav --source zh` | source | 请求体含 source |
-| aud-asrproxy-synctranscribe-05 | --voice-encode-format | `thcli +gen wand/asrproxy/sync_transcribe --model hy-asr-3.0-preview --input-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/speech-zh-10s.wav --voice-encode-format x` | voice_encode_format | 请求体含 voice_encode_format |
+| aud-asrproxy-synctranscribe-04 | --source | `thcli +gen wand/asrproxy/sync_transcribe --model hy-asr-3.0-preview --input-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/speech-zh-10s.wav --source af-ZA` | source | 请求体含 source |
+| aud-asrproxy-synctranscribe-05 | --voice-encode-format | `thcli +gen wand/asrproxy/sync_transcribe --model hy-asr-3.0-preview --input-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/audio/speech-zh-10s.wav --voice-encode-format auto` | voice_encode_format | 请求体含 voice_encode_format |
 | aud-asrproxy-synctranscribe-06 | --input-url 本地文件 | `thcli +gen wand/asrproxy/sync_transcribe --model hy-asr-3.0-preview --input-url ../assets/images/cat-window.jpg` | 只收 URL | 本地报「只收公网 URL」 |
 
 ### wand/asrproxy/async_create
@@ -450,7 +469,7 @@
 | ID | 场景 | 命令 | 覆盖 | 预期 |
 |---|---|---|---|---|
 | aud-asrproxy-asynccreate-01 | 最小调用 | `thcli +gen wand/asrproxy/async_create --model hy-asr-3.0-preview --input-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/videos/dub-video.mp4` | 必填字段 | 请求体含全部必填字段 |
-| aud-asrproxy-asynccreate-02 | --source | `thcli +gen wand/asrproxy/async_create --model hy-asr-3.0-preview --input-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/videos/dub-video.mp4 --source zh` | source | 请求体含 source |
+| aud-asrproxy-asynccreate-02 | --source | `thcli +gen wand/asrproxy/async_create --model hy-asr-3.0-preview --input-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/videos/dub-video.mp4 --source af-ZA` | source | 请求体含 source |
 | aud-asrproxy-asynccreate-03 | --subtitle-format | `thcli +gen wand/asrproxy/async_create --model hy-asr-3.0-preview --input-url https://mps-ollie-test-1308104797.cos.ap-guangzhou.myqcloud.com/thcli-assets/videos/dub-video.mp4 --subtitle-format srt` | subtitle_format | 请求体含 subtitle_format |
 | aud-asrproxy-asynccreate-04 | 缺 --input-url | `thcli +gen wand/asrproxy/async_create --model hy-asr-3.0-preview` | 必填校验 | 本地报「--input-url 必填」 |
 | aud-asrproxy-asynccreate-05 | --input-url 本地文件 | `thcli +gen wand/asrproxy/async_create --model hy-asr-3.0-preview --input-url ../assets/images/cat-window.jpg` | 只收 URL | 本地报「只收公网 URL」 |
@@ -515,7 +534,7 @@
 |---|---|---|---|---|
 | aud-dubbing-asyncgeneration-01 | 最小调用 | `thcli +gen wand/dubbing/async_generation --model wand-dubbing-clone-v1 --input-url ../assets/videos/dub-video.mp4` | 必填字段 | 请求体含全部必填字段 |
 | aud-dubbing-asyncgeneration-02 | --src-language | `thcli +gen wand/dubbing/async_generation --model wand-dubbing-clone-v1 --input-url ../assets/videos/dub-video.mp4 --src-language zh` | src_language | 请求体含 src_language |
-| aud-dubbing-asyncgeneration-03 | --dst-language | `thcli +gen wand/dubbing/async_generation --model wand-dubbing-clone-v1 --input-url ../assets/videos/dub-video.mp4 --dst-language en` | dst_language | 请求体含 dst_language |
+| aud-dubbing-asyncgeneration-03 | --dst-language | `thcli +gen wand/dubbing/async_generation --model wand-dubbing-clone-v1 --input-url ../assets/videos/dub-video.mp4 --dst-language zh` | dst_language | 请求体含 dst_language |
 | aud-dubbing-asyncgeneration-04 | 缺 --input-url | `thcli +gen wand/dubbing/async_generation --model wand-dubbing-clone-v1` | 必填校验 | 本地报「--input-url 必填」 |
 
 ### wand/minimax-music/generation

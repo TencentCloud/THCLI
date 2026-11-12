@@ -104,14 +104,14 @@ describe("响应归一化（用文档示例响应）", () => {
     }
   });
 
-  it("ASR 同步响应（带 id 字段的网关真实形状）：文本 + 字幕 URL 归一", () => {
+  it("ASR 同步响应（带 id 字段的网关真实形状）：文本 + 字幕 URL + 时长归一", () => {
     const r = familyOf("hy-asr-3.0-preview")!.parse({
       id: "th_..._asrproxy_...",
       status: "completed",
-      output: { text: "转写正文", subtitle_url: "https://x/out.srt", source: "zh" },
+      output: { text: "转写正文", subtitle_url: "https://x/out.srt", source: "zh", duration_ms: 15230 },
     });
     assert.deepEqual([r.state, r.texts, r.urls], ["succeeded", ["转写正文"], ["https://x/out.srt"]]);
-    assert.deepEqual(r.meta, { language: "zh" });
+    assert.deepEqual(r.meta, { language: "zh", duration_ms: "15230" });
     assert.equal(ep("wand/asrproxy/sync_transcribe").sync, true, "同步直转是同步接口");
     assert.equal(ep("wand/asrproxy/async_create").sync, false);
   });
@@ -152,12 +152,27 @@ describe("响应归一化（用文档示例响应）", () => {
     assert.match(fail.error ?? "", /参数错误/);
   });
 
-  it("克隆 / 设计：voice_id 进 meta；Mureka：choices 多条 URL", () => {
+  it("克隆 / 设计：voice_id 进 meta；Mureka：choices 多条 URL；flac_url 进 extraUrls；非 succeeded 状态判失败（failed_reason）", () => {
     const c = familyOf("minimax-voice-clone")!.parse({ voice_id: "custom123", demo_audio: "https://x/d.mp3" });
     assert.deepEqual([c.state, c.meta], ["succeeded", { voice_id: "custom123" }]);
 
-    const m = familyOf("mureka-music-v9")!.parse({ choices: [{ url: "https://x/1.mp3" }, { url: "https://x/2.mp3" }] });
-    assert.deepEqual(m.urls, ["https://x/1.mp3", "https://x/2.mp3"]);
+    const f = familyOf("mureka-music-v9")!;
+    const m = f.parse({ status: "succeeded", choices: [{ url: "https://x/1.mp3", flac_url: "https://x/1.flac" }, { url: "https://x/2.mp3" }] });
+    assert.deepEqual([m.state, m.urls, m.extraUrls], ["succeeded", ["https://x/1.mp3", "https://x/2.mp3"], ["https://x/1.flac"]]);
+    // 文档示例响应不带 status：保持兼容（无 status 视为成功）
+    assert.deepEqual(f.parse({ choices: [{ url: "https://x/1.mp3" }] }).urls, ["https://x/1.mp3"]);
+    const failed = f.parse({ status: "failed", failed_reason: "内容审核未通过" });
+    assert.deepEqual([failed.state, failed.error], ["failed", "内容审核未通过"]);
+    assert.equal(f.parse({ status: "timeouted" }).state, "failed");
+  });
+
+  it("HiDream 生图（同步）：data[].url；空 data 判失败", () => {
+    const f = familyOf("hidream-image-o1-1.5")!;
+    const r = f.parse({ created: 1793780017, data: [{ item_index: 0, url: "https://x/a.png" }], request_id: "r", tokenhub_usage: { total_tokens: 60000 } });
+    assert.deepEqual([r.state, r.urls], ["succeeded", ["https://x/a.png"]]);
+    assert.equal(f.parse({ data: [] }).state, "failed");
+    assert.equal(ep("wand/hidream-image/images/generations").sync, true);
+    assert.equal(ep("wand/hidream-image/images/edits").sync, true);
   });
 
   it("配音查询：output.result_url", () => {

@@ -65,8 +65,12 @@ const ANTHROPIC_DEFAULT_MAX_TOKENS = 4096;
  * 非流式请求的超时（毫秒）。只对非流式设：流式下"回答很长"本就是正常情况，
  * 用同一个总时限会把长回答误杀。非流式是一问一答，卡这么久基本可判为服务端没返回。
  * 用 AbortSignal.timeout 而不是给整个 fetch 设一个笼统时限——它同时覆盖连接与响应两段。
+ *
+ * 深度思考（--thinking）放宽到 300 秒：思考链是隐藏输出，非流式要等「思考 + 回答」
+ * 全部生成完才返回，长思考题实测超 120 秒（2026-11-11 Web 端 Hy4 超时报障）。
  */
 const REQUEST_TIMEOUT_MS = 120_000;
+const THINKING_REQUEST_TIMEOUT_MS = 300_000;
 
 
 /** +chat 的参数 */
@@ -258,14 +262,24 @@ function buildPayload(opts: ChatOptions, req: ResolvedRequest): Record<string, u
   return payload;
 }
 
-/** 流式：逐块打印。各通道的 chunk 结构不同 */
+/** 流式：逐块输出。
+ *  人类模式直接打印正文增量（思考增量跳过，避免终端噪音）；
+ *  --json 机器模式每行一个 JSON 事件：reasoning_delta / content_delta / done（带 model、request_id、usage），
+ *  供 Web 控制台等消费方实时渲染思考过程与正文 */
 async function printStream(
   body: ReadableStream<Uint8Array>,
   payloadChannel: PayloadShape,
+  meta: { machine: boolean; model?: string; requestId?: string },
 ): Promise<void> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let usage: Record<string, unknown> | undefined;
+
+  const emit = (type: "reasoning_delta" | "content_delta", text: string): void => {
+    if (meta.machine) process.stdout.write(`${JSON.stringify({ type, text })}\n`);
+    else if (type === "content_delta") process.stdout.write(text);
+  };
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -282,27 +296,38 @@ async function printStream(
       if (data === "[DONE]") continue;
       try {
         const evt = JSON.parse(data) as Record<string, unknown>;
+        // usage 尽力收：chat 通道尾块 / Anthropic message_delta / responses 的 response.completed
+        const u = (evt["usage"] ?? (evt["response"] as Record<string, unknown> | undefined)?.["usage"]) as Record<string, unknown> | undefined;
+        if (u && typeof u === "object") usage = u;
         if (payloadChannel === "anthropic") {
-          // Anthropic 流是带类型的事件流，正文只在 content_block_delta 里；
+          // Anthropic 流是带类型的事件流：thinking_delta（思考增量）与 text_delta（正文）都在 content_block_delta 里；
           // 其余（message_start / ping / message_stop 等）没有可打印内容
           const delta = evt["delta"] as Record<string, unknown> | undefined;
-          if (evt["type"] === "content_block_delta" && typeof delta?.["text"] === "string") {
-            process.stdout.write(delta["text"]);
+          if (evt["type"] === "content_block_delta") {
+            if (typeof delta?.["thinking"] === "string") emit("reasoning_delta", delta["thinking"]);
+            else if (typeof delta?.["text"] === "string") emit("content_delta", delta["text"]);
           }
         } else if (payloadChannel === "responses") {
-          // responses 通道的 delta 是裸字符串
-          if (typeof evt["delta"] === "string") process.stdout.write(evt["delta"]);
+          // responses 通道的 delta 是裸字符串；事件 type 含 reasoning 的是推理摘要增量
+          if (typeof evt["delta"] === "string") {
+            emit(String(evt["type"] ?? "").includes("reasoning") ? "reasoning_delta" : "content_delta", evt["delta"]);
+          }
         } else {
           const choices = evt["choices"] as Array<Record<string, unknown>> | undefined;
           const delta = choices?.[0]?.["delta"] as Record<string, unknown> | undefined;
-          if (typeof delta?.["content"] === "string") process.stdout.write(delta["content"]);
+          if (typeof delta?.["reasoning_content"] === "string") emit("reasoning_delta", delta["reasoning_content"]);
+          else if (typeof delta?.["content"] === "string") emit("content_delta", delta["content"]);
         }
       } catch {
         // 非 JSON 的心跳/注释行直接跳过
       }
     }
   }
-  process.stdout.write("\n");
+  if (meta.machine) {
+    process.stdout.write(`${JSON.stringify({ type: "done", model: meta.model, requestId: meta.requestId, usage })}\n`);
+  } else {
+    process.stdout.write("\n");
+  }
 }
 
 /** 非流式：打印思考过程（如有）与回答 */
@@ -415,10 +440,8 @@ function validateChatOptions(opts: ChatOptions, site: string): void {
   if (!opts.message && !opts.input?.length) {
     throw new Error(t("chat.needContent"));
   }
-  // 流式是 SSE 逐块输出，拼不出一个完整 JSON——早点说清，别让 --json 静默失效
-  if (opts.stream && isJson()) {
-    throw new Error(t("chat.jsonNoStream"));
-  }
+  // --stream --json 组合 = NDJSON 事件流（reasoning_delta / content_delta / done），
+  // 供脚本与 Web 控制台实时消费（含思考过程）；不再互斥报错
   const regions = allowedRegions(site);
   if (opts.area && !regions.includes(opts.area)) {
     throw new Error(t("chat.badArea", { site, area: opts.area, options: regions.join(", ") }));
@@ -455,14 +478,23 @@ async function chatCommand(opts: ChatOptions, globals: GlobalArgs): Promise<void
   if (opts.verbose) traceRequest("POST", req.url, headers, payload);
   let resp: Response;
   try {
-    // 非流式才设超时：流式回答可能持续很久，设总时限会误杀正常的长回答
-    const signal = opts.stream ? undefined : AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    // 非流式才设超时：流式回答可能持续很久，设总时限会误杀正常的长回答；
+    // 深度思考用放宽档（思考链 + 回答全部生成完才返回，见 THINKING_REQUEST_TIMEOUT_MS 注释）
+    const timeoutMs = opts.thinking === true ? THINKING_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+    const signal = opts.stream ? undefined : AbortSignal.timeout(timeoutMs);
     resp = await fetch(req.url, { method: "POST", headers, body: JSON.stringify(payload), signal });
   } catch (err) {
     // 网络层错误或超时：请求根本没到网关（或没拿到响应），不存在 request_id
     const aborted = (err as Error).name === "TimeoutError" || (err as Error).name === "AbortError";
-    log("error", undefined, aborted ? `timeout ${REQUEST_TIMEOUT_MS}ms` : (err as Error).message);
-    console.log(aborted ? t("chat.requestTimeout", { seconds: REQUEST_TIMEOUT_MS / 1000 }) : t("chat.requestFailed", { message: (err as Error).message }));
+    const timeoutMs = opts.thinking === true ? THINKING_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+    const message = aborted ? t("chat.requestTimeout", { seconds: timeoutMs / 1000 }) : t("chat.requestFailed", { message: (err as Error).message });
+    log("error", undefined, aborted ? `timeout ${timeoutMs}ms` : (err as Error).message);
+    // NDJSON 流模式（--stream --json）：错误也走事件行，消费方（Web 控制台）才能透传真实原因
+    if (opts.stream && isJson()) {
+      process.stdout.write(`${JSON.stringify({ type: "error", error: message })}\n`);
+      return;
+    }
+    console.log(message);
     console.log(t("chat.noRequestId"));
     return;
   }
@@ -470,6 +502,12 @@ async function chatCommand(opts: ChatOptions, globals: GlobalArgs): Promise<void
   if (!resp.ok) {
     const text = await resp.text();
     if (opts.verbose) traceResponse(resp.status, Date.now() - start, text);
+    if (opts.stream && isJson()) {
+      // NDJSON 流模式：HTTP 错误走事件行（多行块解析不了）
+      process.stdout.write(`${JSON.stringify({ type: "error", status: resp.status, error: text.slice(0, 2000) })}\n`);
+      log("error", extractRequestId(resp.headers), `HTTP ${resp.status}`);
+      return;
+    }
     log("error", await reportHttpError(resp, req.url, text), `HTTP ${resp.status}`);
     return;
   }
@@ -479,7 +517,7 @@ async function chatCommand(opts: ChatOptions, globals: GlobalArgs): Promise<void
     if (opts.verbose) traceResponse(resp.status, Date.now() - start);
     // 流式下只能从响应头取 request_id（body 是 SSE 流，不能当 JSON 解析）
     const requestId = extractRequestId(resp.headers);
-    await printStream(resp.body, req.payloadChannel);
+    await printStream(resp.body, req.payloadChannel, { machine: Boolean(isJson()), model: opts.model, requestId });
     log("ok", requestId, undefined, { model: opts.model, stream: true });
     return;
   }

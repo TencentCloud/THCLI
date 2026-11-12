@@ -57,7 +57,7 @@ describe("注册表完整性", () => {
     for (const f of FAMILIES) {
       for (const d of [f.doc].flat()) assert.match(d, /^https:\/\/cloud\.tencent\.com\/document\/product\/1823\/\d+$/, `${f.id} ${d}`);
     }
-    assert.equal(APIS.length, 36);
+    assert.equal(APIS.length, 38);
     assert.equal(new Set(APIS.map((e) => e.id)).size, APIS.length);
     assert.equal(ep("wand/vidu/text-to-video").path, "/v1/wand/vidu/text-to-video");
     assert.equal(ep("api/3d/submit").path, "/v1/api/3d/submit");
@@ -98,6 +98,8 @@ describe("注册表完整性", () => {
       ["wand/vega-images/generations", ["prompt", "input", "size"]],
       ["wand/vidu-image/generation", ["prompt", "images", "aspect_ratio", "resolution", "seed", "callback_url"]],
       ["wand/kling-image/generation", ["prompt", "negative_prompt", "image", "image_list", "element_list", "aspect_ratio", "resolution", "n", "watermark_info", "result_type", "series_amount"]],
+      ["wand/hidream-image/images/generations", ["prompt", "size"]],
+      ["wand/hidream-image/images/edits", ["prompt", "images", "size"]],
       ["wand/hunyuan-video/generation", ["prompt", "negative_prompt", "image", "image_url", "n", "duration", "aspect_ratio", "resolution", "revise", "moderation", "seed", "footnote"]],
       ["wand/kling/text-to-video", ["prompt", "settings", "options"]],
       ["wand/kling/image-to-video", ["contents", "settings", "options"]],
@@ -161,7 +163,7 @@ describe("注册表完整性", () => {
       ["kling-video-v3", 26000],
       ["vidu-video-q3", 5000],
       ["pixverse-video-v6.0", 5000],
-      ["minimax-video-h3", 2000],
+      ["minimax-video-h3", 7000],
       ["hy-world2-panorama", 600],
       ["minimax-speech-2.8-hd", 10000],
       ["mureka-music-v9", 2000],
@@ -255,18 +257,57 @@ describe("请求体校验（适用模型 / 必填 / 互斥）", () => {
     assert.throws(() => parseParamValue(param(H, "ratio"), "5:4"), /must be one of/);
   });
 
-  it("content 内 text 块长度：H3 拦 2000；WAND 拦 8192（调用指南口径），2000~8192 放行", () => {
+  it("hy-image-v3.5：is_generate 仅 role=tool 消息可传（其它角色传了报错）", () => {
+    const H = "wand/hunyuan-image/v35-generation";
+    const base = { messages: [{ role: "user", content: [{ type: "text", text: "一只猫" }] }] };
+    ok(H, { ...base, messages: [...base.messages, { role: "tool", tool_call_id: "c1", content: [{ type: "image_url", image_url: { url: "https://x/a.png" }, is_generate: true }] }] });
+    bad(H, { ...base, messages: [...base.messages, { role: "assistant", content: [{ type: "image_url", image_url: { url: "https://x/a.png" }, is_generate: true }] }] }, /role=tool/);
+    bad(H, { ...base, messages: [{ role: "user", content: [{ type: "text", text: "猫" }, { type: "image_url", image_url: { url: "https://x/a.png" }, is_generate: false }] }] }, /is_generate/);
+  });
+
+  it("content 内 text 块长度：H3 拦 7000（调用指南更新）；WAND 拦 8192，7000~8192 放行", () => {
     const H = "wand/minimax-video-v2/generation";
     const hb = { model: "minimax-video-h3", resolution: "768P", duration: 6, ratio: "16:9" };
-    const long = "a".repeat(2001);
-    bad(H, { ...hb, content: [{ type: "text", text: long }] }, /content\[\]\.text is 2001 characters/);
-    ok(H, { ...hb, content: [{ type: "text", text: "a".repeat(2000) }, { type: "image_url", image_url: { url: "https://x/a.jpg" }, role: "first_frame" }] });
+    const long = "a".repeat(7001);
+    bad(H, { ...hb, content: [{ type: "text", text: long }] }, /content\[\]\.text is 7001 characters/);
+    ok(H, { ...hb, content: [{ type: "text", text: "a".repeat(7000) }, { type: "image_url", image_url: { url: "https://x/a.jpg" }, role: "first_frame" }] });
     const W = "wand/vega-videos/tasks";
     const wb = { model: "wand-vega-video-1.0-lite" };
-    ok(W, { ...wb, content: [{ type: "text", text: "a".repeat(5000) }] });
+    ok(W, { ...wb, content: [{ type: "text", text: "a".repeat(7500) }] });
     bad(W, { ...wb, content: [{ type: "text", text: "a".repeat(8193) }] }, /content\[\]\.text is 8193 characters/);
     // 素材块不带 text：不受长度校验影响
     ok(W, { ...wb, content: [{ type: "image_url", image_url: { url: "https://x/a.jpg" } }] });
+  });
+
+  it("MiniMax H3：图生（首尾帧）与参考生 role 互斥；extra.prompt_expansion_mode 仅 h3-max", () => {
+    const H = "wand/minimax-video-v2/generation";
+    const base = { model: "minimax-video-h3", resolution: "768P", duration: 6, ratio: "16:9" };
+    const text = { type: "text", text: "猫" };
+    ok(H, { ...base, content: [text, { type: "image_url", image_url: { url: "https://x/a.jpg" }, role: "first_frame" }, { type: "image_url", image_url: { url: "https://x/b.jpg" }, role: "last_frame" }] });
+    ok(H, { ...base, content: [text, { type: "image_url", image_url: { url: "https://x/a.jpg" }, role: "reference_image" }, { type: "video_url", video_url: { url: "https://x/v.mp4" }, role: "reference_video" }] });
+    bad(H, { ...base, content: [text, { type: "image_url", image_url: { url: "https://x/a.jpg" }, role: "first_frame" }, { type: "image_url", image_url: { url: "https://x/b.jpg" }, role: "reference_image" }] }, /mutually exclusive/);
+    // h3 传 prompt_expansion_mode 会被服务端忽略，本地先拦（仅 h3-max 生效）
+    bad(H, { ...base, content: [text], extra: { prompt_expansion_mode: "quality" } }, /prompt_expansion_mode/);
+    ok(H, { ...base, model: "minimax-video-h3-max", content: [text], extra: { prompt_expansion_mode: "quality" } });
+  });
+
+  it("HiDream 生图：文生 / 编辑两接口各归各模型，edits 参考图 1~6 张、支持本地文件（dataUrl），size 7 档 + auto", () => {
+    const G = "wand/hidream-image/images/generations";
+    const E = "wand/hidream-image/images/edits";
+    assert.deepEqual(ep(G).models, ["hidream-image-o1-1.5"]);
+    assert.deepEqual(ep(E).models, ["hidream-image-o1-1.5-edit"]);
+    assert.deepEqual(param(G, "size").choices, ["2048x2048", "2304x1728", "1728x2304", "2560x1440", "1440x2560", "2496x1664", "1664x2496", "auto"]);
+    ok(G, { model: "hidream-image-o1-1.5", prompt: "p", size: "2560x1440" });
+    // edits：images 必填且 1~6 张
+    bad(E, { model: "hidream-image-o1-1.5-edit", prompt: "p" }, /--images is required/);
+    ok(E, { model: "hidream-image-o1-1.5-edit", prompt: "p", images: ["https://x/a.png", "https://x/b.jpg"] });
+    bad(E, { model: "hidream-image-o1-1.5-edit", prompt: "p", images: Array.from({ length: 7 }, (_, i) => `https://x/${i}.png`) }, /1-6 reference images \(got 7\)/);
+    // edits 的参考图支持本地文件（实测 data URL 内联，2026-11-10 确认；文档声明滞后）
+    assert.equal(single(E, "images").encoding, "dataUrl");
+    // 合计校验：全部参考图 Base64 ≤100MB（⟺ 原始 ≤75MB）
+    const big = `data:image/png;base64,${"A".repeat(50_000_001)}`;
+    bad(E, { model: "hidream-image-o1-1.5-edit", prompt: "p", images: [big, big] }, /100MB/);
+    ok(E, { model: "hidream-image-o1-1.5-edit", prompt: "p", images: [big] });
   });
 
   it("音视频本地文件限制：音色复刻 mp3/m4a/wav ≤20MB；配音 mp4/mov/m4v ≤75MB", () => {
@@ -428,7 +469,8 @@ describe("请求体校验（适用模型 / 必填 / 互斥）", () => {
     const img = { type: "image", url: "https://x/a.jpg" };
     const mv = { type: "video", url: v };
     const el = { type: "element", element_id: "e", id: "e1" };
-    bad(M, { model: "kling-video-motion-control-v3.0", contents: [img, { type: "video", url: "AAAA" }], settings: { character_orientation: "video" } }, /public URLs/);
+    // 动作视频支持本地文件（data URL；上游实测受理）
+    ok(M, { model: "kling-video-motion-control-v3.0", contents: [img, { type: "video", url: "data:video/mp4;base64,AAAA" }], settings: { character_orientation: "video" } });
     ok(M, { model: "kling-video-motion-control-v3.0", contents: [img, mv, el], settings: { character_orientation: "video" } });
     bad(M, { model: "kling-video-motion-control-v3.0", contents: [img, mv, el], settings: { character_orientation: "image" } }, /must be video when an element/);
     bad(M, { model: "kling-video-motion-control-v3.0", contents: [img, mv, el, { ...el, id: "e2" }], settings: { character_orientation: "video" } }, /At most 1 blocks of type=element/);
@@ -531,7 +573,7 @@ describe("本地文件编码位置（mapMedia）", () => {
     assert.equal(vegaContent[2]!.maxBytes, 15_000_000);
     assert.equal(single("wand/asrproxy/async_create", "input_url").encoding, "urlOnly");
     assert.equal(single("wand/asrproxy/sync_transcribe", "data").encoding, "raw");
-    // ASR 同步 data ≤75MB（TokenPlan 最终版 9-23；原实现无上限）
+    // ASR 同步 data ≤75MB（TokenPlan 最终版 9-23；原实现无上限）；异步仅收公网 URL（data 实测不支持）
     assert.equal(single("wand/asrproxy/sync_transcribe", "data").maxBytes, 75_000_000);
     // panorama 参考图改名 image_url 单值仅 URL（TokenPlan 最终版 9-23；与 world2-scene 姊妹接口对齐）
     assert.equal(single("wand/hunyuan-image/world2-panorama", "image_url").encoding, "urlOnly");
@@ -586,6 +628,26 @@ describe("--param / --body（覆盖层）", () => {
     assert.throws(() => parseParams(["oops"]));
     assert.throws(() => parseParams([":=1"]));
     assert.throws(() => parseParams(["cfg:={bad"]), /valid JSON/);
+  });
+
+  it("值支持 @file 展开：@ 开头且文件存在 → 读文本为值（大 Base64 / 长 JSON 走临时文件）；不存在的 @ 路径按字面值", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "thc-pp-"));
+    try {
+      const b64File = path.join(dir, "audio.b64");
+      fs.writeFileSync(b64File, "UklGRg==");
+      const jsonFile = path.join(dir, "list.json");
+      fs.writeFileSync(jsonFile, JSON.stringify({ ok: 1 }));
+      // key=@file：读文本为字符串值（资源大 Base64 场景）
+      assert.deepEqual(parseParams([`data=@${b64File}`]), { data: "UklGRg==" });
+      // key:=@file：读文本再按 JSON 解析（长 JSON 场景）
+      assert.deepEqual(parseParams([`cfg:=@${jsonFile}`]), { cfg: { ok: 1 } });
+      // @ 指向不存在的文件：按字面值原样（与 +chat --input 同语义）
+      assert.deepEqual(parseParams(["data=@/no/such/file"]), { data: "@/no/such/file" });
+      // 非 @ 开头不受影响
+      assert.deepEqual(parseParams(["data=UklGRg=="]), { data: "UklGRg==" });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("拒收原型链键名，嵌套 JSON 里的也剔除", () => {

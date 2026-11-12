@@ -32,3 +32,6 @@ Thumbs.db
 skills/
 tools/
 assets/
+
+# 工具生成的本地目录
+.xac/
